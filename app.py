@@ -206,31 +206,33 @@ def test_javascript_execution():
             log_and_append("  Step 4: 複雑なデータ抽出テスト")
             
             try:
-                # 商品情報の一括抽出（エラーハンドリング強化）
+                # 商品情報の一括抽出（関数形式で修正）
                 product_extraction_script = '''
-                try {
-                    const items = Array.from(document.querySelectorAll('.product-item'));
-                    if (items.length === 0) {
-                        throw new Error('No product items found');
-                    }
-                    
-                    return items.map(item => {
-                        const nameEl = item.querySelector('.product-name');
-                        const priceEl = item.querySelector('.product-price');
-                        
-                        if (!nameEl || !priceEl) {
-                            throw new Error('Required elements not found');
+                (function() {
+                    try {
+                        const items = Array.from(document.querySelectorAll('.product-item'));
+                        if (items.length === 0) {
+                            return { error: 'No product items found' };
                         }
                         
-                        return {
-                            name: nameEl.textContent,
-                            price: priceEl.textContent,
-                            priceValue: parseInt(item.dataset.price)
-                        };
-                    });
-                } catch (error) {
-                    return { error: error.message };
-                }
+                        return items.map(item => {
+                            const nameEl = item.querySelector('.product-name');
+                            const priceEl = item.querySelector('.product-price');
+                            
+                            if (!nameEl || !priceEl) {
+                                return { error: 'Required elements not found' };
+                            }
+                            
+                            return {
+                                name: nameEl.textContent,
+                                price: priceEl.textContent,
+                                priceValue: parseInt(item.dataset.price)
+                            };
+                        });
+                    } catch (error) {
+                        return { error: error.message };
+                    }
+                })()
                 '''
                 
                 products = await tab.evaluate(product_extraction_script)
