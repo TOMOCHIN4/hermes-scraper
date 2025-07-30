@@ -156,8 +156,10 @@ def test_hermes_site_scraping():
                     except Exception as scroll_error:
                         log_and_append(f"    ⚠️ スクロールエラー: {scroll_error}")
                     
-                    # 基本情報取得
+                    # 【詳細ロギング】基本ページ情報の完全取得
                     try:
+                        log_and_append(f"    🔍 ページ詳細情報取得開始")
+                        
                         # ページタイトル取得
                         title = await tab.evaluate('document.title')
                         log_and_append(f"    ページタイトル: '{title}'")
@@ -166,23 +168,147 @@ def test_hermes_site_scraping():
                         current_url = await tab.evaluate('window.location.href')
                         log_and_append(f"    現在URL: {current_url}")
                         
+                        # Redirect確認
+                        original_url = site['url']
+                        if current_url != original_url:
+                            log_and_append(f"    🔄 リダイレクト検出:")
+                            log_and_append(f"      元URL: {original_url}")
+                            log_and_append(f"      現URL: {current_url}")
+                        
                         # 基本的なページ要素確認
                         body_exists = await tab.evaluate('document.body ? true : false')
                         log_and_append(f"    Body要素: {'存在' if body_exists else '不存在'}")
                         
                         if body_exists:
-                            # ページ内容の一部取得
-                            content_length = await tab.evaluate('document.body.innerText.length')
-                            log_and_append(f"    ページ内容長: {content_length}文字")
+                            # 【詳細ロギング】ページコンテンツ分析
+                            page_analysis = await tab.evaluate('''
+                            (function() {
+                                const body = document.body;
+                                const analysis = {
+                                    contentLength: body.innerText.length,
+                                    htmlLength: body.innerHTML.length,
+                                    childElementCount: body.children.length,
+                                    hasScripts: document.scripts.length,
+                                    hasAngular: !!window.angular || !!document.querySelector('[ng-app]') || !!document.querySelector('h-root'),
+                                    visible_text_sample: body.innerText.substring(0, 200),
+                                    meta_viewport: document.querySelector('meta[name="viewport"]') ? 'exists' : 'missing',
+                                    page_ready_state: document.readyState
+                                };
+                                
+                                // CAPTCHA/ブロック検出
+                                analysis.security_indicators = {
+                                    captcha: !!document.querySelector('[class*="captcha"], [id*="captcha"]'),
+                                    cloudflare: !!document.querySelector('[data-cf-beacon], .cf-browser-verification'),
+                                    blocked_text: body.innerText.toLowerCase().includes('blocked') || body.innerText.toLowerCase().includes('access denied'),
+                                    bot_detected: body.innerText.toLowerCase().includes('bot') && body.innerText.toLowerCase().includes('detected')
+                                };
+                                
+                                return analysis;
+                            })()
+                            ''')
                             
-                            # hermes-state スクリプトの存在確認
-                            hermes_state_exists = await tab.evaluate('document.getElementById("hermes-state") ? true : false')
-                            log_and_append(f"    hermes-state スクリプト: {'存在' if hermes_state_exists else '不存在'}")
+                            log_and_append(f"    📄 ページコンテンツ分析:")
+                            log_and_append(f"      テキスト長: {page_analysis['contentLength']}文字")
+                            log_and_append(f"      HTML長: {page_analysis['htmlLength']}文字") 
+                            log_and_append(f"      子要素数: {page_analysis['childElementCount']}個")
+                            log_and_append(f"      スクリプト数: {page_analysis['hasScripts']}個")
+                            log_and_append(f"      Angular検出: {page_analysis['hasAngular']}")
+                            log_and_append(f"      ページ状態: {page_analysis['page_ready_state']}")
                             
-                            # JSON データサイズ確認
-                            if hermes_state_exists:
-                                json_size = await tab.evaluate('document.getElementById("hermes-state").textContent.length')
-                                log_and_append(f"    JSON データサイズ: {json_size}文字")
+                            # 【重要】セキュリティ・ブロック検出
+                            security = page_analysis['security_indicators']
+                            log_and_append(f"    🛡️ セキュリティ状況:")
+                            log_and_append(f"      CAPTCHA: {security['captcha']}")
+                            log_and_append(f"      Cloudflare: {security['cloudflare']}")
+                            log_and_append(f"      ブロック検出: {security['blocked_text']}")
+                            log_and_append(f"      Bot検出: {security['bot_detected']}")
+                            
+                            # コンテンツサンプル表示
+                            if page_analysis['visible_text_sample']:
+                                log_and_append(f"    📝 表示テキストサンプル:")
+                                log_and_append(f"      '{page_analysis['visible_text_sample']}'")
+                            
+                            # hermes-state スクリプトの詳細確認
+                            hermes_state_analysis = await tab.evaluate('''
+                            (function() {
+                                const script = document.getElementById('hermes-state');
+                                if (script) {
+                                    const content = script.textContent;
+                                    return {
+                                        exists: true,
+                                        size: content.length,
+                                        type: script.type,
+                                        first_100_chars: content.substring(0, 100),
+                                        last_100_chars: content.length > 100 ? content.substring(content.length - 100) : '',
+                                        looks_like_json: content.trim().startsWith('{') || content.trim().startsWith('[')
+                                    };
+                                } else {
+                                    // 他のスクリプトタグも確認
+                                    const all_scripts = Array.from(document.scripts);
+                                    const json_scripts = all_scripts.filter(s => 
+                                        s.type === 'application/json' || 
+                                        s.id.includes('state') || 
+                                        s.id.includes('data')
+                                    );
+                                    
+                                    return {
+                                        exists: false,
+                                        total_scripts: all_scripts.length,
+                                        json_scripts: json_scripts.map(s => ({id: s.id, type: s.type, size: s.textContent.length}))
+                                    };
+                                }
+                            })()
+                            ''')
+                            
+                            log_and_append(f"    📜 hermes-state スクリプト分析:")
+                            if hermes_state_analysis['exists']:
+                                log_and_append(f"      ✅ 存在確認")
+                                log_and_append(f"      サイズ: {hermes_state_analysis['size']}文字")
+                                log_and_append(f"      タイプ: {hermes_state_analysis['type']}")
+                                log_and_append(f"      JSON形式: {hermes_state_analysis['looks_like_json']}")
+                                log_and_append(f"      開始100文字: '{hermes_state_analysis['first_100_chars']}'")
+                                if hermes_state_analysis['last_100_chars']:
+                                    log_and_append(f"      終端100文字: '{hermes_state_analysis['last_100_chars']}'")
+                            else:
+                                log_and_append(f"      ❌ hermes-state not found")
+                                log_and_append(f"      総スクリプト数: {hermes_state_analysis['total_scripts']}")
+                                log_and_append(f"      JSONスクリプト: {hermes_state_analysis['json_scripts']}")
+                            
+                            # Angular/DOM要素の詳細確認
+                            dom_analysis = await tab.evaluate('''
+                            (function() {
+                                const selectors_to_check = [
+                                    'h-root', 'h-grid-results', 'h-grid-result-item', 'h-grid-page',
+                                    '.product-grid-list', '.search-results', '[data-testid="product-grid"]',
+                                    '.product-item', '.product-card', 'article'
+                                ];
+                                
+                                const results = {};
+                                selectors_to_check.forEach(selector => {
+                                    const elements = document.querySelectorAll(selector);
+                                    results[selector] = {
+                                        count: elements.length,
+                                        first_element_info: elements[0] ? {
+                                            tagName: elements[0].tagName,
+                                            className: elements[0].className,
+                                            innerText_length: elements[0].innerText ? elements[0].innerText.length : 0
+                                        } : null
+                                    };
+                                });
+                                
+                                return results;
+                            })()
+                            ''')
+                            
+                            log_and_append(f"    🔍 DOM要素詳細分析:")
+                            for selector, info in dom_analysis.items():
+                                if info['count'] > 0:
+                                    log_and_append(f"      ✅ {selector}: {info['count']}個")
+                                    if info['first_element_info']:
+                                        first = info['first_element_info']
+                                        log_and_append(f"        第1要素: {first['tagName']}.{first['className']} ({first['innerText_length']}文字)")
+                                else:
+                                    log_and_append(f"      ❌ {selector}: 0個")
                             
                             successful_connections += 1
                             accessible_pages.append({
@@ -190,7 +316,10 @@ def test_hermes_site_scraping():
                                 "url": site['url'],
                                 "title": title,
                                 "tab": tab,
-                                "extract_products": site.get('extract_products', False)
+                                "extract_products": site.get('extract_products', False),
+                                "analysis": page_analysis,
+                                "hermes_state": hermes_state_analysis,
+                                "dom_analysis": dom_analysis
                             })
                         
                     except Exception as info_error:
