@@ -65,32 +65,33 @@ def test_javascript_execution():
             # テスト1: 基本的なJavaScript実行
             log_and_append("  Step 2: 基本JavaScript実行テスト")
             
-            # 複雑なHTMLページを作成
+            # 複雑なHTMLページを作成（英語版で文字化け回避）
             test_html = '''
             data:text/html,
             <html>
             <head>
                 <title>JavaScript Test Page</title>
+                <meta charset="UTF-8">
             </head>
             <body>
                 <div id="main-container">
-                    <h1 class="title">テストページ</h1>
+                    <h1 class="title">Test Page</h1>
                     <ul class="product-list">
                         <li class="product-item" data-price="100000">
-                            <span class="product-name">商品A</span>
-                            <span class="product-price">¥100,000</span>
+                            <span class="product-name">Product A</span>
+                            <span class="product-price">$1,000</span>
                         </li>
                         <li class="product-item" data-price="150000">
-                            <span class="product-name">商品B</span>
-                            <span class="product-price">¥150,000</span>
+                            <span class="product-name">Product B</span>
+                            <span class="product-price">$1,500</span>
                         </li>
                         <li class="product-item" data-price="200000">
-                            <span class="product-name">商品C</span>
-                            <span class="product-price">¥200,000</span>
+                            <span class="product-name">Product C</span>
+                            <span class="product-price">$2,000</span>
                         </li>
                     </ul>
                     <div class="hidden-content" style="display:none;">
-                        隠れたコンテンツ
+                        Hidden Content
                     </div>
                 </div>
                 
@@ -171,7 +172,7 @@ def test_javascript_execution():
                 {
                     "name": "CSSセレクタ",
                     "script": "document.querySelector('.title').textContent",
-                    "expected": "テストページ"
+                    "expected": "Test Page"
                 },
                 {
                     "name": "複数セレクタ",
@@ -205,38 +206,66 @@ def test_javascript_execution():
             log_and_append("  Step 4: 複雑なデータ抽出テスト")
             
             try:
-                # 商品情報の一括抽出
+                # 商品情報の一括抽出（エラーハンドリング強化）
                 product_extraction_script = '''
-                Array.from(document.querySelectorAll('.product-item')).map(item => ({
-                    name: item.querySelector('.product-name').textContent,
-                    price: item.querySelector('.product-price').textContent,
-                    priceValue: parseInt(item.dataset.price)
-                }))
+                try {
+                    const items = Array.from(document.querySelectorAll('.product-item'));
+                    if (items.length === 0) {
+                        throw new Error('No product items found');
+                    }
+                    
+                    return items.map(item => {
+                        const nameEl = item.querySelector('.product-name');
+                        const priceEl = item.querySelector('.product-price');
+                        
+                        if (!nameEl || !priceEl) {
+                            throw new Error('Required elements not found');
+                        }
+                        
+                        return {
+                            name: nameEl.textContent,
+                            price: priceEl.textContent,
+                            priceValue: parseInt(item.dataset.price)
+                        };
+                    });
+                } catch (error) {
+                    return { error: error.message };
+                }
                 '''
                 
                 products = await tab.evaluate(product_extraction_script)
-                log_and_append(f"    ✅ 商品情報抽出成功: {len(products)}件")
                 
-                for i, product in enumerate(products, 1):
-                    log_and_append(f"      商品{i}: {product['name']} - {product['price']} (値:{product['priceValue']})")
-                
-                # 合計金額計算
-                total_script = '''
-                Array.from(document.querySelectorAll('.product-item'))
-                     .reduce((sum, item) => sum + parseInt(item.dataset.price), 0)
-                '''
-                
-                total = await tab.evaluate(total_script)
-                log_and_append(f"    ✅ 合計金額計算: ¥{total:,}")
-                
-                # グローバル変数アクセス
-                global_data = await tab.evaluate('window.testData')
-                log_and_append(f"    ✅ グローバル変数取得: {global_data}")
-                
-                extraction_success = True
+                # エラーチェック
+                if isinstance(products, dict) and 'error' in products:
+                    log_and_append(f"    ❌ 商品抽出エラー: {products['error']}")
+                    extraction_success = False
+                elif isinstance(products, list) and len(products) > 0:
+                    log_and_append(f"    ✅ 商品情報抽出成功: {len(products)}件")
+                    
+                    for i, product in enumerate(products, 1):
+                        log_and_append(f"      商品{i}: {product['name']} - {product['price']} (値:{product['priceValue']})")
+                    
+                    # 合計金額計算
+                    total_script = '''
+                    Array.from(document.querySelectorAll('.product-item'))
+                         .reduce((sum, item) => sum + parseInt(item.dataset.price), 0)
+                    '''
+                    
+                    total = await tab.evaluate(total_script)
+                    log_and_append(f"    ✅ 合計金額計算: ${total:,}")
+                    
+                    # グローバル変数アクセス
+                    global_data = await tab.evaluate('window.testData')
+                    log_and_append(f"    ✅ グローバル変数取得: {global_data}")
+                    
+                    extraction_success = True
+                else:
+                    log_and_append(f"    ❌ 予期しない結果: {products}")
+                    extraction_success = False
                 
             except Exception as e:
                 log_and_append(f"    ❌ データ抽出エラー: {e}")
+                log_and_append(f"    エラー詳細: {traceback.format_exc()}")
                 extraction_success = False
             
             log_and_append("")
@@ -259,7 +288,7 @@ def test_javascript_execution():
                 const newItem = document.createElement('li');
                 newItem.className = 'product-item';
                 newItem.dataset.price = '300000';
-                newItem.innerHTML = '<span class="product-name">動的商品</span><span class="product-price">¥300,000</span>';
+                newItem.innerHTML = '<span class="product-name">Dynamic Product</span><span class="product-price">$3,000</span>';
                 document.querySelector('.product-list').appendChild(newItem);
                 document.querySelectorAll('.product-item').length;
                 '''
