@@ -3,3 +3,4 @@ nodriver>=0.34
 asyncio-throttle
 aiohttp
 nest-asyncio
+psutil
