@@ -244,23 +244,41 @@ def test_javascript_execution():
                 elif isinstance(products, list) and len(products) > 0:
                     log_and_append(f"    ✅ 商品情報抽出成功: {len(products)}件")
                     
-                    for i, product in enumerate(products, 1):
-                        log_and_append(f"      商品{i}: {product['name']} - {product['price']} (値:{product['priceValue']})")
+                    # デバッグ: 実際の構造を確認
+                    log_and_append(f"    デバッグ: products構造 = {products}")
                     
-                    # 合計金額計算
-                    total_script = '''
-                    Array.from(document.querySelectorAll('.product-item'))
-                         .reduce((sum, item) => sum + parseInt(item.dataset.price), 0)
-                    '''
-                    
-                    total = await tab.evaluate(total_script)
-                    log_and_append(f"    ✅ 合計金額計算: ${total:,}")
-                    
-                    # グローバル変数アクセス
-                    global_data = await tab.evaluate('window.testData')
-                    log_and_append(f"    ✅ グローバル変数取得: {global_data}")
-                    
-                    extraction_success = True
+                    try:
+                        for i, product in enumerate(products, 1):
+                            # 安全にアクセス
+                            if isinstance(product, dict):
+                                if 'error' in product:
+                                    log_and_append(f"      商品{i}: エラー - {product['error']}")
+                                else:
+                                    name = product.get('name', 'N/A')
+                                    price = product.get('price', 'N/A') 
+                                    price_value = product.get('priceValue', 0)
+                                    log_and_append(f"      商品{i}: {name} - {price} (値:{price_value})")
+                            else:
+                                log_and_append(f"      商品{i}: 予期しない形式 - {product}")
+                        
+                        # 合計金額計算
+                        total_script = '''
+                        Array.from(document.querySelectorAll('.product-item'))
+                             .reduce((sum, item) => sum + parseInt(item.dataset.price), 0)
+                        '''
+                        
+                        total = await tab.evaluate(total_script)
+                        log_and_append(f"    ✅ 合計金額計算: ${total:,}")
+                        
+                        # グローバル変数アクセス
+                        global_data = await tab.evaluate('window.testData')
+                        log_and_append(f"    ✅ グローバル変数取得: {global_data}")
+                        
+                        extraction_success = True
+                        
+                    except Exception as detail_error:
+                        log_and_append(f"    ❌ 商品詳細処理エラー: {detail_error}")
+                        extraction_success = False
                 else:
                     log_and_append(f"    ❌ 予期しない結果: {products}")
                     extraction_success = False
