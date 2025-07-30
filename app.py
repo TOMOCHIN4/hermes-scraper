@@ -80,9 +80,9 @@ def test_hermes_site_scraping():
                     "timeout": 20
                 },
                 {
-                    "name": "エルメス商品カテゴリページ",
-                    "url": "https://www.hermes.com/jp/ja/category/women/",
-                    "timeout": 25
+                    "name": "エルメスバッグ検索ページ（商品抽出テスト用）",
+                    "url": "https://www.hermes.com/jp/ja/search/?s=%E3%83%90%E3%83%83%E3%82%B0#",
+                    "timeout": 30
                 },
                 {
                     "name": "エルメスバッグカテゴリ",
