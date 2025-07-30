@@ -17,9 +17,11 @@ async def extract_hermes_products(search_term=""):
     """エルメス公式サイトから商品情報を抽出する"""
     browser = None
     try:
+        print("ブラウザ起動を開始...")
         # プライベートモード（シークレットモード）でブラウザを起動
         browser = await nd.start(
             headless=True,
+            sandbox=False,  # Docker環境では必須
             browser_args=[
                 '--incognito',  # プライベートモード
                 '--no-sandbox',
@@ -28,16 +30,28 @@ async def extract_hermes_products(search_term=""):
                 '--disable-extensions',
                 '--disable-plugins',
                 '--disable-images',
+                '--disable-web-security',
+                '--disable-features=VizDisplayCompositor',
                 '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
             ]
         )
         
+        if browser is None:
+            raise Exception("ブラウザの起動に失敗しました")
+        
+        print("ブラウザ起動成功、ページアクセス開始...")
+        
         # エルメス公式サイトのバッグページにアクセス
         base_url = "https://www.hermes.com/jp/ja/category/women/bags-and-small-leather-goods/bags-and-clutches/"
-        tab = await browser.get(base_url)
+        print(f"アクセス先URL: {base_url}")
         
+        tab = await browser.get(base_url)
+        if tab is None:
+            raise Exception("ページの取得に失敗しました")
+        
+        print("ページアクセス成功、読み込み待機中...")
         # ページの読み込みを待つ
-        await asyncio.sleep(5)
+        await asyncio.sleep(8)
         
         # JavaScriptで商品情報を抽出
         products_script = """
@@ -95,7 +109,9 @@ async def extract_hermes_products(search_term=""):
         """
         
         # 商品情報を抽出
+        print("JavaScript実行開始...")
         products = await tab.evaluate(products_script)
+        print(f"抽出した商品数: {len(products) if products else 0}")
         
         # フィルタリング
         if search_term:
@@ -123,17 +139,40 @@ async def extract_hermes_products(search_term=""):
         }
     finally:
         if browser:
-            await browser.stop()
+            try:
+                print("ブラウザを終了中...")
+                await browser.stop()
+                print("ブラウザ終了完了")
+            except Exception as e:
+                print(f"ブラウザ終了時エラー: {e}")
+                pass
 
 def run_extraction(search_term=""):
     """非同期関数を同期的に実行"""
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        print("非同期処理開始...")
+        # 既存のイベントループをチェック
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                print("既存のループを使用")
+                import nest_asyncio
+                nest_asyncio.apply()
+                result = asyncio.create_task(extract_hermes_products(search_term))
+                return result
+        except RuntimeError:
+            print("新しいイベントループを作成")
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
         result = loop.run_until_complete(extract_hermes_products(search_term))
         loop.close()
+        print("非同期処理完了")
         return result
     except Exception as e:
+        print(f"実行エラーの詳細: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return {
             'success': False,
             'error': str(e),
