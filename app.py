@@ -104,9 +104,57 @@ def test_hermes_site_scraping():
                     
                     log_and_append(f"    ✅ ページアクセス成功")
                     
-                    # 検索結果ページの完全レンダリング待機
-                    log_and_append(f"    ⏳ JavaScript実行・DOM構築完了待機...")
-                    await asyncio.sleep(8)  # 検索結果読み込み時間を考慮
+                    # 検索結果ページの完全レンダリング待機（改善版）
+                    log_and_append(f"    ⏳ Angular初期化・商品リスト読み込み待機...")
+                    
+                    # Step 1: 基本待機（Angular初期化）
+                    await asyncio.sleep(10)
+                    
+                    # Step 2: 商品コンテナ要素の出現を待機
+                    container_selectors = [
+                        'h-grid-results',
+                        '.product-grid-list',
+                        '[data-testid="product-grid"]',
+                        '.search-results',
+                        'h-grid-result-item'
+                    ]
+                    
+                    container_found = False
+                    for selector in container_selectors:
+                        try:
+                            log_and_append(f"      要素待機: {selector}")
+                            # 要素出現まで最大20秒待機
+                            for attempt in range(40):  # 0.5秒 × 40回 = 20秒
+                                element_exists = await tab.evaluate(f'document.querySelector("{selector}") ? true : false')
+                                if element_exists:
+                                    log_and_append(f"      ✅ 要素発見: {selector}")
+                                    container_found = True
+                                    break
+                                await asyncio.sleep(0.5)
+                            
+                            if container_found:
+                                break
+                                
+                        except Exception as wait_error:
+                            log_and_append(f"      ⚠️ 要素待機エラー: {selector} - {wait_error}")
+                    
+                    if not container_found:
+                        log_and_append(f"    ⚠️ 商品コンテナ要素が見つかりません（20秒経過）")
+                    
+                    # Step 3: 追加でスクロール処理（無限スクロール対応）
+                    log_and_append(f"    📜 ページスクロール実行...")
+                    try:
+                        await tab.evaluate('''
+                            window.scrollTo(0, document.body.scrollHeight / 2);
+                        ''')
+                        await asyncio.sleep(2)
+                        await tab.evaluate('''
+                            window.scrollTo(0, document.body.scrollHeight);
+                        ''')
+                        await asyncio.sleep(3)
+                        log_and_append(f"    ✅ スクロール完了")
+                    except Exception as scroll_error:
+                        log_and_append(f"    ⚠️ スクロールエラー: {scroll_error}")
                     
                     # 基本情報取得
                     try:
@@ -183,54 +231,118 @@ def test_hermes_site_scraping():
                         # エルメス特有のJSON データ抽出方式
                         log_and_append(f"      エルメス特化: JSON データ抽出を試行")
                         
-                        # Method 1: hermes-state スクリプトからJSON抽出
-                        json_extraction_script = '''
+                        # Step 1: JSON構造の完全デバッグ（外部指摘対応）
+                        debug_script = '''
                         (function() {
                             try {
-                                // hermes-state スクリプト要素を探索
                                 const hermesStateScript = document.getElementById('hermes-state');
                                 if (hermesStateScript) {
-                                    const jsonData = JSON.parse(hermesStateScript.textContent);
+                                    const jsonText = hermesStateScript.textContent;
+                                    const jsonData = JSON.parse(jsonText);
                                     
-                                    // 商品データの探索
-                                    let productData = null;
-                                    
-                                    // パターン1: products.items
-                                    if (jsonData.products && jsonData.products.items) {
-                                        productData = {
-                                            total: jsonData.products.total || jsonData.products.items.length,
-                                            items: jsonData.products.items.slice(0, 5).map(item => ({
-                                                title: item.title,
-                                                url: item.url,
-                                                sku: item.sku,
-                                                price: item.price
-                                            }))
-                                        };
-                                    }
-                                    
-                                    // パターン2: 直接的な products 配列
-                                    else if (Array.isArray(jsonData.products)) {
-                                        productData = {
-                                            total: jsonData.products.length,
-                                            items: jsonData.products.slice(0, 5).map(item => ({
-                                                title: item.title,
-                                                url: item.url,
-                                                sku: item.sku,
-                                                price: item.price
-                                            }))
-                                        };
-                                    }
-                                    
-                                    if (productData) {
-                                        return { success: true, data: productData };
-                                    } else {
-                                        return { success: false, error: 'Product data structure not found', keys: Object.keys(jsonData) };
-                                    }
+                                    return {
+                                        success: true,
+                                        debug: {
+                                            jsonSize: jsonText.length,
+                                            dataType: Array.isArray(jsonData) ? 'array' : typeof jsonData,
+                                            topLevelKeys: Array.isArray(jsonData) ? `array[${jsonData.length}]` : Object.keys(jsonData),
+                                            firstElement: Array.isArray(jsonData) ? (jsonData[0] ? Object.keys(jsonData[0]) : 'empty') : 'not array',
+                                            rawSample: JSON.stringify(jsonData).substring(0, 500)
+                                        }
+                                    };
                                 } else {
                                     return { success: false, error: 'hermes-state script not found' };
                                 }
                             } catch (error) {
                                 return { success: false, error: error.message };
+                            }
+                        })()
+                        '''
+                        
+                        debug_result = await tab.evaluate(debug_script)
+                        log_and_append(f"      📊 JSON構造デバッグ結果:")
+                        log_and_append(f"        成功: {debug_result.get('success')}")
+                        
+                        if debug_result.get('success'):
+                            debug_info = debug_result['debug']
+                            log_and_append(f"        JSONサイズ: {debug_info['jsonSize']}文字")
+                            log_and_append(f"        データ型: {debug_info['dataType']}")
+                            log_and_append(f"        トップレベルキー: {debug_info['topLevelKeys']}")
+                            log_and_append(f"        第1要素キー: {debug_info['firstElement']}")
+                            log_and_append(f"        RAWサンプル: {debug_info['rawSample']}")
+                        else:
+                            log_and_append(f"        エラー: {debug_result.get('error')}")
+                        
+                        # Step 2: 構造に応じた商品データ抽出（改善版）
+                        json_extraction_script = '''
+                        (function() {
+                            try {
+                                const hermesStateScript = document.getElementById('hermes-state');
+                                if (hermesStateScript) {
+                                    const jsonData = JSON.parse(hermesStateScript.textContent);
+                                    let productData = null;
+                                    
+                                    // パターン1: jsonData自体が配列の場合
+                                    if (Array.isArray(jsonData)) {
+                                        // 配列の中から products を含む要素を探索
+                                        for (let item of jsonData) {
+                                            if (item && item.products) {
+                                                if (Array.isArray(item.products.items)) {
+                                                    productData = {
+                                                        total: item.products.total || item.products.items.length,
+                                                        items: item.products.items.slice(0, 5).map(p => ({
+                                                            title: p.title || p.name,
+                                                            url: p.url || p.link,
+                                                            sku: p.sku || p.id,
+                                                            price: p.price
+                                                        }))
+                                                    };
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    // パターン2: 従来の辞書型 products.items
+                                    else if (jsonData.products && jsonData.products.items) {
+                                        productData = {
+                                            total: jsonData.products.total || jsonData.products.items.length,
+                                            items: jsonData.products.items.slice(0, 5).map(p => ({
+                                                title: p.title || p.name,
+                                                url: p.url || p.link,
+                                                sku: p.sku || p.id,
+                                                price: p.price
+                                            }))
+                                        };
+                                    }
+                                    
+                                    // パターン3: 直接的な products 配列
+                                    else if (Array.isArray(jsonData.products)) {
+                                        productData = {
+                                            total: jsonData.products.length,
+                                            items: jsonData.products.slice(0, 5).map(p => ({
+                                                title: p.title || p.name,
+                                                url: p.url || p.link,
+                                                sku: p.sku || p.id,
+                                                price: p.price
+                                            }))
+                                        };
+                                    }
+                                    
+                                    if (productData && productData.items.length > 0) {
+                                        return { success: true, data: productData };
+                                    } else {
+                                        return { 
+                                            success: false, 
+                                            error: 'Product data structure not found',
+                                            available_keys: Array.isArray(jsonData) ? 'array_structure' : Object.keys(jsonData)
+                                        };
+                                    }
+                                } else {
+                                    return { success: false, error: 'hermes-state script not found' };
+                                }
+                            } catch (error) {
+                                return { success: false, error: error.message, stack: error.stack };
                             }
                         })()
                         '''
