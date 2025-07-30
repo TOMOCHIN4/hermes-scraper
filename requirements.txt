@@ -1,0 +1,4 @@
+gradio>=5.0.0
+nodriver>=0.34
+asyncio-throttle
+aiohttp
