@@ -75,19 +75,10 @@ def test_hermes_site_scraping():
             
             hermes_urls = [
                 {
-                    "name": "エルメス日本公式トップページ",
-                    "url": "https://www.hermes.com/jp/ja/",
-                    "timeout": 20
-                },
-                {
-                    "name": "エルメスバッグ検索ページ（商品抽出テスト用）",
+                    "name": "エルメスバッグ検索ページ（JSON抽出テスト用）",
                     "url": "https://www.hermes.com/jp/ja/search/?s=%E3%83%90%E3%83%83%E3%82%B0#",
-                    "timeout": 30
-                },
-                {
-                    "name": "エルメスバッグカテゴリ",
-                    "url": "https://www.hermes.com/jp/ja/category/women/bags-and-clutches/",
-                    "timeout": 30
+                    "timeout": 45,
+                    "extract_products": True
                 }
             ]
             
@@ -113,8 +104,9 @@ def test_hermes_site_scraping():
                     
                     log_and_append(f"    ✅ ページアクセス成功")
                     
-                    # ページロード完了を待機
-                    await asyncio.sleep(3)
+                    # 検索結果ページの完全レンダリング待機
+                    log_and_append(f"    ⏳ JavaScript実行・DOM構築完了待機...")
+                    await asyncio.sleep(8)  # 検索結果読み込み時間を考慮
                     
                     # 基本情報取得
                     try:
@@ -135,12 +127,22 @@ def test_hermes_site_scraping():
                             content_length = await tab.evaluate('document.body.innerText.length')
                             log_and_append(f"    ページ内容長: {content_length}文字")
                             
+                            # hermes-state スクリプトの存在確認
+                            hermes_state_exists = await tab.evaluate('document.getElementById("hermes-state") ? true : false')
+                            log_and_append(f"    hermes-state スクリプト: {'存在' if hermes_state_exists else '不存在'}")
+                            
+                            # JSON データサイズ確認
+                            if hermes_state_exists:
+                                json_size = await tab.evaluate('document.getElementById("hermes-state").textContent.length')
+                                log_and_append(f"    JSON データサイズ: {json_size}文字")
+                            
                             successful_connections += 1
                             accessible_pages.append({
                                 "name": site['name'],
                                 "url": site['url'],
                                 "title": title,
-                                "tab": tab
+                                "tab": tab,
+                                "extract_products": site.get('extract_products', False)
                             })
                         
                     except Exception as info_error:
@@ -169,6 +171,11 @@ def test_hermes_site_scraping():
                 
                 for page in accessible_pages:
                     log_and_append(f"    対象ページ: {page['name']}")
+                    
+                    # 商品抽出指定があるページのみで実行
+                    if not page.get('extract_products', False):
+                        log_and_append(f"    スキップ: 商品抽出対象外")
+                        continue
                     
                     try:
                         tab = page['tab']
