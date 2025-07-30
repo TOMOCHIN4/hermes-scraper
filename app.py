@@ -556,13 +556,16 @@ def test_hermes_site_scraping():
                                                     if 's' in top_value and isinstance(top_value['s'], dict):
                                                         s_data = top_value['s']
                                                         
-                                                        # products構造を探す
+                                                        # products構造を探す（エルメスの正確な構造）
                                                         if 'products' in s_data and isinstance(s_data['products'], dict):
                                                             products = s_data['products']
                                                             if 'items' in products:
                                                                 product_items = products['items']
                                                                 products_found = True
-                                                                log_and_append(f"        🎯 {top_key}.s.products.items発見")
+                                                                total_count = products.get('total', len(products['items']))
+                                                                log_and_append(f"        🎯 {top_key}.s.products.items発見！")
+                                                                log_and_append(f"        ✅ 総商品数: {total_count}")
+                                                                log_and_append(f"        ✅ 取得商品数: {len(product_items)}")
                                                                 break
                                                         # 直接itemsがある場合
                                                         elif 'items' in s_data:
@@ -670,17 +673,18 @@ def test_hermes_site_scraping():
                                     const jsonData = JSON.parse(hermesStateScript.textContent);
                                     let productData = null;
                                     
-                                    // エルメス特有の構造を探索
+                                    // エルメス特有の構造を探索（正確な構造: 数値キー.s.products）
                                     const searchInObject = (obj, path = '') => {
                                         if (!obj || typeof obj !== 'object') return null;
                                         
-                                        // 's' (search) キーを優先的に探す
+                                        // 's' (search) キーを優先的に探す - エルメスの正確な構造
                                         if (obj.s && typeof obj.s === 'object') {
                                             const sData = obj.s;
-                                            // products.items
-                                            if (sData.products && sData.products.items) {
+                                            // products.items - これが正解！
+                                            if (sData.products && typeof sData.products === 'object' && sData.products.items && Array.isArray(sData.products.items)) {
                                                 return {
-                                                    path: path + '.s.products.items',
+                                                    path: path + '.s.products',
+                                                    total: sData.products.total || sData.products.items.length,
                                                     items: sData.products.items
                                                 };
                                             }
@@ -688,6 +692,7 @@ def test_hermes_site_scraping():
                                             if (sData.items && Array.isArray(sData.items)) {
                                                 return {
                                                     path: path + '.s.items',
+                                                    total: sData.items.length,
                                                     items: sData.items
                                                 };
                                             }
@@ -695,15 +700,17 @@ def test_hermes_site_scraping():
                                             if (sData.results && Array.isArray(sData.results)) {
                                                 return {
                                                     path: path + '.s.results',
+                                                    total: sData.results.length,
                                                     items: sData.results
                                                 };
                                             }
                                         }
                                         
-                                        // products直下を探す
-                                        if (obj.products && obj.products.items) {
+                                        // products直下を探す（フォールバック）
+                                        if (obj.products && obj.products.items && Array.isArray(obj.products.items)) {
                                             return {
-                                                path: path + '.products.items',
+                                                path: path + '.products',
+                                                total: obj.products.total || obj.products.items.length,
                                                 items: obj.products.items
                                             };
                                         }
@@ -716,15 +723,16 @@ def test_hermes_site_scraping():
                                         const result = searchInObject(jsonData[key], key);
                                         if (result) {
                                             productData = {
-                                                total: result.items.length,
+                                                total: result.total,
                                                 path: result.path,
-                                                items: result.items.slice(0, 5).map(p => ({
+                                                items: result.items.slice(0, 10).map(p => ({
                                                     title: p.title || p.name || p.displayName || 'N/A',
                                                     url: p.url || p.link || p.href || 'N/A',
                                                     sku: p.sku || p.id || p.code || 'N/A',
                                                     price: p.price || p.priceRange || 'N/A'
                                                 }))
                                             };
+                                            console.log('✅ 商品データ発見:', result.path, '総数:', result.total);
                                             break;
                                         }
                                     }
@@ -769,14 +777,15 @@ def test_hermes_site_scraping():
                                 items = product_data['items']
                                 
                                 log_and_append(f"      ✅ JSON商品データ抽出成功!")
+                                log_and_append(f"      データパス: {product_data.get('path', 'N/A')}")
                                 log_and_append(f"      総商品数: {total_count}")
                                 log_and_append(f"      サンプル商品: {len(items)}件")
                                 
                                 for i, item in enumerate(items, 1):
                                     log_and_append(f"        {i}. {item['title']}")
-                                    log_and_append(f"           URL: {item['url']}")
+                                    log_and_append(f"           URL: https://www.hermes.com/jp/ja{item['url']}")
                                     log_and_append(f"           SKU: {item['sku']}")
-                                    if item['price']:
+                                    if item.get('price'):
                                         log_and_append(f"           価格: {item['price']}")
                                 
                                 extraction_success = True
