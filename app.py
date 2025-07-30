@@ -517,12 +517,38 @@ def test_hermes_site_scraping():
                                                 products_found = True
                                                 log_and_append(f"        🎯 products.items発見（直接）")
                                         
-                                        # パターン2: 数値キー -> b -> products構造（エルメス特有）
+                                        # パターン2: 数値キー -> s -> products構造（エルメス特有）
                                         if not products_found:
                                             for top_key in list(actual_json_data.keys())[:10]:  # 最初の10キーをチェック
                                                 top_value = actual_json_data[top_key]
                                                 if isinstance(top_value, dict):
-                                                    # 'b'キーを探す
+                                                    # 's'キー（search/商品）を探す
+                                                    if 's' in top_value and isinstance(top_value['s'], dict):
+                                                        s_data = top_value['s']
+                                                        log_and_append(f"        [DEBUG] {top_key}.s発見、サブキー: {list(s_data.keys())[:5]}")
+                                                        
+                                                        # products構造を探す
+                                                        if 'products' in s_data and isinstance(s_data['products'], dict):
+                                                            products = s_data['products']
+                                                            if 'items' in products:
+                                                                product_items = products['items']
+                                                                products_found = True
+                                                                log_and_append(f"        🎯 {top_key}.s.products.items発見")
+                                                                break
+                                                        # 直接itemsがある場合
+                                                        elif 'items' in s_data:
+                                                            product_items = s_data['items']
+                                                            products_found = True
+                                                            log_and_append(f"        🎯 {top_key}.s.items発見")
+                                                            break
+                                                        # resultsキーの場合
+                                                        elif 'results' in s_data:
+                                                            product_items = s_data['results']
+                                                            products_found = True
+                                                            log_and_append(f"        🎯 {top_key}.s.results発見")
+                                                            break
+                                                    
+                                                    # 'b'キーも確認（breadcrumb）
                                                     if 'b' in top_value and isinstance(top_value['b'], dict):
                                                         b_data = top_value['b']
                                                         if 'products' in b_data and isinstance(b_data['products'], dict):
@@ -532,6 +558,7 @@ def test_hermes_site_scraping():
                                                                 products_found = True
                                                                 log_and_append(f"        🎯 {top_key}.b.products.items発見")
                                                                 break
+                                                    
                                                     # 直接productsを持つ場合
                                                     elif 'products' in top_value and isinstance(top_value['products'], dict):
                                                         products = top_value['products']
@@ -576,6 +603,19 @@ def test_hermes_site_scraping():
                                                 log_and_append(f"        キー'{key}'の構造: {type(value)}")
                                                 if isinstance(value, dict):
                                                     log_and_append(f"          サブキー: {list(value.keys())[:5]}")
+                                                    # 's'キーの詳細確認
+                                                    if 's' in value and isinstance(value['s'], dict):
+                                                        s_keys = list(value['s'].keys())
+                                                        log_and_append(f"          's'キーの内容: {s_keys[:10]}")
+                                                        # さらに深い階層を確認
+                                                        for s_key in s_keys[:3]:
+                                                            s_value = value['s'][s_key]
+                                                            if isinstance(s_value, dict):
+                                                                log_and_append(f"            s.{s_key}: {list(s_value.keys())[:5]}")
+                                                            elif isinstance(s_value, list):
+                                                                log_and_append(f"            s.{s_key}: リスト（{len(s_value)}要素）")
+                                                                if len(s_value) > 0 and isinstance(s_value[0], dict):
+                                                                    log_and_append(f"              第1要素のキー: {list(s_value[0].keys())[:10]}")
                                     else:
                                         log_and_append(f"        ⚠️ JSONが辞書型ではない: {type(actual_json_data)}")
                                         
@@ -601,60 +641,82 @@ def test_hermes_site_scraping():
                                     const jsonData = JSON.parse(hermesStateScript.textContent);
                                     let productData = null;
                                     
-                                    // パターン1: jsonData自体が配列の場合
-                                    if (Array.isArray(jsonData)) {
-                                        // 配列の中から products を含む要素を探索
-                                        for (let item of jsonData) {
-                                            if (item && item.products) {
-                                                if (Array.isArray(item.products.items)) {
-                                                    productData = {
-                                                        total: item.products.total || item.products.items.length,
-                                                        items: item.products.items.slice(0, 5).map(p => ({
-                                                            title: p.title || p.name,
-                                                            url: p.url || p.link,
-                                                            sku: p.sku || p.id,
-                                                            price: p.price
-                                                        }))
-                                                    };
-                                                    break;
-                                                }
+                                    // エルメス特有の構造を探索
+                                    const searchInObject = (obj, path = '') => {
+                                        if (!obj || typeof obj !== 'object') return null;
+                                        
+                                        // 's' (search) キーを優先的に探す
+                                        if (obj.s && typeof obj.s === 'object') {
+                                            const sData = obj.s;
+                                            // products.items
+                                            if (sData.products && sData.products.items) {
+                                                return {
+                                                    path: path + '.s.products.items',
+                                                    items: sData.products.items
+                                                };
+                                            }
+                                            // 直接items
+                                            if (sData.items && Array.isArray(sData.items)) {
+                                                return {
+                                                    path: path + '.s.items',
+                                                    items: sData.items
+                                                };
+                                            }
+                                            // results
+                                            if (sData.results && Array.isArray(sData.results)) {
+                                                return {
+                                                    path: path + '.s.results',
+                                                    items: sData.results
+                                                };
                                             }
                                         }
-                                    }
+                                        
+                                        // products直下を探す
+                                        if (obj.products && obj.products.items) {
+                                            return {
+                                                path: path + '.products.items',
+                                                items: obj.products.items
+                                            };
+                                        }
+                                        
+                                        return null;
+                                    };
                                     
-                                    // パターン2: 従来の辞書型 products.items
-                                    else if (jsonData.products && jsonData.products.items) {
-                                        productData = {
-                                            total: jsonData.products.total || jsonData.products.items.length,
-                                            items: jsonData.products.items.slice(0, 5).map(p => ({
-                                                title: p.title || p.name,
-                                                url: p.url || p.link,
-                                                sku: p.sku || p.id,
-                                                price: p.price
-                                            }))
-                                        };
-                                    }
-                                    
-                                    // パターン3: 直接的な products 配列
-                                    else if (Array.isArray(jsonData.products)) {
-                                        productData = {
-                                            total: jsonData.products.length,
-                                            items: jsonData.products.slice(0, 5).map(p => ({
-                                                title: p.title || p.name,
-                                                url: p.url || p.link,
-                                                sku: p.sku || p.id,
-                                                price: p.price
-                                            }))
-                                        };
+                                    // トップレベルから探索
+                                    for (let key of Object.keys(jsonData).slice(0, 10)) {
+                                        const result = searchInObject(jsonData[key], key);
+                                        if (result) {
+                                            productData = {
+                                                total: result.items.length,
+                                                path: result.path,
+                                                items: result.items.slice(0, 5).map(p => ({
+                                                    title: p.title || p.name || p.displayName || 'N/A',
+                                                    url: p.url || p.link || p.href || 'N/A',
+                                                    sku: p.sku || p.id || p.code || 'N/A',
+                                                    price: p.price || p.priceRange || 'N/A'
+                                                }))
+                                            };
+                                            break;
+                                        }
                                     }
                                     
                                     if (productData && productData.items.length > 0) {
                                         return { success: true, data: productData };
                                     } else {
+                                        // デバッグ情報を収集
+                                        const debugInfo = {};
+                                        for (let key of Object.keys(jsonData).slice(0, 5)) {
+                                            const value = jsonData[key];
+                                            if (typeof value === 'object' && value !== null) {
+                                                debugInfo[key] = Object.keys(value);
+                                            }
+                                        }
+                                        
                                         return { 
                                             success: false, 
                                             error: 'Product data structure not found',
-                                            available_keys: Array.isArray(jsonData) ? 'array_structure' : Object.keys(jsonData)
+                                            available_keys: Object.keys(jsonData),
+                                            debug_structure: debugInfo
                                         };
                                     }
                                 } else {
