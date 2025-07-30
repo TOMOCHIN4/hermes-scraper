@@ -84,3 +84,105 @@ docker run -p 7860:7860 hermes-scraper
 - HF_TOKEN.txtは機密情報を含むため、リポジトリへのコミット禁止
 - User-Agent文字列の設定でボット検出回避  
 - アンチボット回避のためnodriverを使用（Seleniumより検出されにくい）
+
+## 段階的開発計画（重要）
+
+### 開発方針
+**各Phase完了時にユーザーからの明確な合格承認が必要です。承認なしに次のPhaseには進みません。**
+
+### Phase 1: 基本環境テスト 🔧
+**目標**: Python/Docker環境の完全な動作確認
+**合格基準**:
+- Python 3.10が正常動作
+- 全依存関係のインポート成功
+- Docker環境でのファイル権限確認
+- システム情報の正常取得
+
+**実装内容**:
+```python
+# 基本環境テスト用の最小限アプリ
+def test_basic_environment():
+    print("=== Phase 1: 基本環境テスト ===")
+    print(f"Python version: {sys.version}")
+    print(f"Working directory: {os.getcwd()}")
+    print(f"User: {os.getenv('USER', 'unknown')}")
+    # 依存関係テスト
+    try:
+        import gradio as gr
+        import nodriver as nd
+        import asyncio
+        import nest_asyncio
+        print("✅ All dependencies imported successfully")
+        return True
+    except Exception as e:
+        print(f"❌ Import error: {e}")
+        return False
+```
+
+### Phase 2: Chromium起動テスト 🌐
+**目標**: Chromiumブラウザの単体起動確認
+**合格基準**:
+- Chromiumバイナリの存在確認
+- 最小設定でのプロセス起動成功
+- 適切なプロセス終了確認
+
+**実装内容**:
+```python
+def test_chromium_startup():
+    print("=== Phase 2: Chromium起動テスト ===")
+    # Chromiumバイナリ確認
+    # 最小設定での起動テスト
+    # プロセス管理テスト
+```
+
+### Phase 3: nodriver基本動作テスト 🚀
+**目標**: nodriverの最小限機能確認
+**合格基準**:
+- nodriver.start()の成功
+- ローカルHTMLページでの動作確認
+- 基本的なページ操作（title取得等）
+
+### Phase 4: ネットワーク接続テスト 🔗
+**目標**: 外部サイトへの接続確認
+**合格基準**:
+- DNS解決の成功
+- HTTPS接続の確立
+- 簡単なサイトでのページ取得
+
+### Phase 5: JavaScript実行テスト ⚡
+**目標**: DOM操作とスクレイピング機能
+**合格基準**:
+- JavaScript実行の成功
+- DOM要素の取得・操作
+- 基本的なデータ抽出
+
+### Phase 6: エルメスサイト特化テスト 🛍️
+**目標**: 実際のターゲットサイトでのテスト
+**合格基準**:
+- エルメスサイトへの接続
+- 商品ページの構造解析
+- 実際の商品データ抽出
+
+### Phase 7: Gradioインターフェース統合 🎨
+**目標**: UIとバックエンドの統合
+**合格基準**:
+- 完全なUI機能
+- エラー表示の適切化
+- ユーザビリティ確保
+
+### Phase 8: 最終調整とエラーハンドリング ✨
+**目標**: 本番環境向け最適化
+**合格基準**:
+- 安定したパフォーマンス
+- 完全なエラーハンドリング
+- 本番環境での継続動作
+
+### 現在のステータス
+**現在**: Phase 1開始前（デバッグログ解析中）
+**次のアクション**: デバッグログを確認し、Phase 1のテストアプリを作成
+
+### 重要な開発ルール
+1. **各Phaseは独立したテストアプリとして実装**
+2. **ユーザーの明確な合格承認なしに次に進まない**
+3. **問題発生時は前のPhaseに戻って再検証**
+4. **全てのログと結果を詳細に記録**
