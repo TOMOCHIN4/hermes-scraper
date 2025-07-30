@@ -517,15 +517,44 @@ def test_hermes_site_scraping():
                                                 products_found = True
                                                 log_and_append(f"        🎯 products.items発見（直接）")
                                         
-                                        # パターン2: 数値キー -> s -> products構造（エルメス特有）
+                                        # パターン2: 数値キー探索（エルメス特有）- 常に実行してデバッグ
+                                        log_and_append(f"        [DEBUG] 数値キー探索開始...")
+                                        
+                                        # まず's'キーの内容を詳細に調査
+                                        for i, top_key in enumerate(list(actual_json_data.keys())[:5]):
+                                            if not isinstance(actual_json_data[top_key], dict):
+                                                continue
+                                                
+                                            top_value = actual_json_data[top_key]
+                                            log_and_append(f"        [DEBUG] キー{i+1} '{top_key}':")
+                                            
+                                            # 's'キーの詳細確認
+                                            if 's' in top_value and isinstance(top_value['s'], dict):
+                                                s_data = top_value['s']
+                                                s_keys = list(s_data.keys())
+                                                log_and_append(f"          's'キー発見: {len(s_keys)}個のサブキー")
+                                                log_and_append(f"          's'のサブキー（最初の10個）: {s_keys[:10]}")
+                                                
+                                                # 各サブキーの型を確認
+                                                for s_key in s_keys[:5]:
+                                                    s_value = s_data[s_key]
+                                                    if isinstance(s_value, dict):
+                                                        log_and_append(f"            s.{s_key}: 辞書（キー: {list(s_value.keys())[:5]}）")
+                                                    elif isinstance(s_value, list):
+                                                        log_and_append(f"            s.{s_key}: リスト（{len(s_value)}要素）")
+                                                        if len(s_value) > 0 and isinstance(s_value[0], dict):
+                                                            log_and_append(f"              第1要素: {list(s_value[0].keys())[:10]}")
+                                                    else:
+                                                        log_and_append(f"            s.{s_key}: {type(s_value)}")
+                                        
+                                        # 商品データ探索
                                         if not products_found:
-                                            for top_key in list(actual_json_data.keys())[:10]:  # 最初の10キーをチェック
+                                            for top_key in list(actual_json_data.keys())[:10]:
                                                 top_value = actual_json_data[top_key]
                                                 if isinstance(top_value, dict):
                                                     # 's'キー（search/商品）を探す
                                                     if 's' in top_value and isinstance(top_value['s'], dict):
                                                         s_data = top_value['s']
-                                                        log_and_append(f"        [DEBUG] {top_key}.s発見、サブキー: {list(s_data.keys())[:5]}")
                                                         
                                                         # products構造を探す
                                                         if 'products' in s_data and isinstance(s_data['products'], dict):
@@ -757,8 +786,11 @@ def test_hermes_site_scraping():
                                 error_msg = normalized_json_result.get('error', 'Unknown error') if isinstance(normalized_json_result, dict) else str(normalized_json_result)
                                 log_and_append(f"      ⚠️ JSON抽出失敗: {error_msg}")
                                 
-                                if isinstance(normalized_json_result, dict) and 'available_keys' in normalized_json_result:
-                                    log_and_append(f"      利用可能なキー: {normalized_json_result['available_keys']}")
+                                if isinstance(normalized_json_result, dict):
+                                    if 'available_keys' in normalized_json_result:
+                                        log_and_append(f"      利用可能なキー: {normalized_json_result['available_keys']}")
+                                    if 'debug_structure' in normalized_json_result:
+                                        log_and_append(f"      デバッグ構造: {normalized_json_result['debug_structure']}")
                                 
                                 # フォールバック: 標準セレクタも試行
                                 log_and_append(f"      フォールバック: 標準セレクタを試行")
