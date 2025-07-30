@@ -194,14 +194,70 @@ def test_nodriver_basic():
             return False
             
         finally:
-            # クリーンアップ
+            # 改善されたクリーンアップ処理
             if browser:
                 try:
-                    log_and_append("  🧹 ブラウザクリーンアップ")
-                    await browser.stop()
-                    log_and_append("  ✅ ブラウザ正常終了")
-                except Exception as e:
-                    log_and_append(f"  ⚠️ ブラウザ終了エラー: {e}")
+                    log_and_append("  🧹 ブラウザクリーンアップ開始")
+                    
+                    # Step 1: 全てのタブを安全に閉じる
+                    try:
+                        if hasattr(browser, 'tabs') and browser.tabs:
+                            log_and_append(f"    開いているタブ数: {len(browser.tabs)}")
+                            for i, tab in enumerate(browser.tabs):
+                                try:
+                                    await tab.close()
+                                    log_and_append(f"    タブ {i+1} 閉じました")
+                                except Exception as tab_error:
+                                    log_and_append(f"    タブ {i+1} 閉じる際エラー: {tab_error}")
+                        else:
+                            log_and_append("    タブなし、またはタブ情報取得不可")
+                    except Exception as tabs_error:
+                        log_and_append(f"    タブ処理エラー: {tabs_error}")
+                    
+                    # Step 2: 接続を安全に閉じる
+                    try:
+                        if hasattr(browser, 'connection') and browser.connection:
+                            log_and_append("    WebSocket接続を閉じています...")
+                            await browser.connection.aclose()
+                            log_and_append("    ✅ WebSocket接続閉じました")
+                        else:
+                            log_and_append("    WebSocket接続なし、またはすでに閉じられています")
+                    except Exception as conn_error:
+                        log_and_append(f"    WebSocket接続エラー: {conn_error}")
+                    
+                    # Step 3: ブラウザプロセスを確認・終了
+                    try:
+                        if hasattr(browser, '_process') and browser._process:
+                            log_and_append("    ブラウザプロセス終了中...")
+                            if browser._process.poll() is None:  # プロセスがまだ実行中
+                                browser._process.terminate()
+                                try:
+                                    await asyncio.wait_for(browser._process.wait(), timeout=5)
+                                    log_and_append("    ✅ ブラウザプロセス正常終了")
+                                except asyncio.TimeoutError:
+                                    browser._process.kill()
+                                    await browser._process.wait()
+                                    log_and_append("    ⚠️ ブラウザプロセス強制終了")
+                            else:
+                                log_and_append("    ブラウザプロセスは既に終了済み")
+                        else:
+                            log_and_append("    ブラウザプロセス情報なし")
+                    except Exception as process_error:
+                        log_and_append(f"    プロセス終了エラー: {process_error}")
+                    
+                    # Step 4: 最後にbrowser.stop()を呼び出す（エラーを無視）
+                    try:
+                        await browser.stop()
+                        log_and_append("    ✅ browser.stop()完了")
+                    except Exception as stop_error:
+                        log_and_append(f"    browser.stop()エラー（無視）: {stop_error}")
+                    
+                    log_and_append("  ✅ ブラウザクリーンアップ完了")
+                    
+                except Exception as cleanup_error:
+                    log_and_append(f"  ❌ クリーンアップ全体エラー: {cleanup_error}")
+            else:
+                log_and_append("  ブラウザオブジェクトなし - クリーンアップ不要")
     
     # 非同期テストを実行
     try:
