@@ -1,15 +1,12 @@
 import sys
 import os
-import platform
-import subprocess
-import signal
-import time
-import psutil
+import asyncio
 import gradio as gr
 from datetime import datetime
+import traceback
 
-def test_chromium_startup():
-    """Phase 2: Chromium起動テスト"""
+def test_nodriver_basic():
+    """Phase 3: nodriver基本動作テスト"""
     results = []
     
     # コンテナログにも同時出力する関数
@@ -19,232 +16,270 @@ def test_chromium_startup():
         sys.stdout.flush()
     
     # 初期ログ出力
-    print("=== Phase 2: Chromium起動テスト ===")
+    print("=== Phase 3: nodriver基本動作テスト ===")
     print(f"実行時刻: {datetime.now()}")
     print("")
     sys.stdout.flush()
     
-    log_and_append("=== Phase 2: Chromium起動テスト ===")
+    log_and_append("=== Phase 3: nodriver基本動作テスト ===")
     log_and_append(f"実行時刻: {datetime.now()}")
     log_and_append("")
     
-    # Phase 1で確認済みの情報を再確認
-    log_and_append("📋 Phase 1結果の再確認:")
-    chromium_path = "/usr/bin/chromium"
-    if os.path.exists(chromium_path):
-        log_and_append(f"  ✅ Chromiumバイナリ: {chromium_path}")
-    else:
-        log_and_append(f"  ❌ Chromiumバイナリが見つかりません: {chromium_path}")
-        log_and_append("Phase 2 ステータス: FAILED - Phase 1を再実行してください")
+    # Phase 1,2結果の再確認
+    log_and_append("📋 前Phase結果の再確認:")
+    log_and_append("  ✅ Phase 1: Python環境、依存関係、Chromiumバイナリ")
+    log_and_append("  ✅ Phase 2: Chromium起動、プロセス管理、デバッグポート")
+    log_and_append("")
+    
+    # nodriverインポートテスト
+    log_and_append("📦 nodriverインポートテスト:")
+    try:
+        import nodriver as nd
+        log_and_append("  ✅ nodriver インポート成功")
+        log_and_append(f"  モジュールパス: {nd.__file__ if hasattr(nd, '__file__') else 'unknown'}")
+        log_and_append(f"  バージョン: {nd.__version__ if hasattr(nd, '__version__') else 'unknown'}")
+        
+        # nodriverの主要属性確認
+        log_and_append("  主要属性:")
+        important_attrs = ['start', 'Browser', 'Tab', 'Element']
+        for attr in important_attrs:
+            if hasattr(nd, attr):
+                log_and_append(f"    ✅ {attr}: {type(getattr(nd, attr))}")
+            else:
+                log_and_append(f"    ❌ {attr}: 存在しません")
+    except Exception as e:
+        log_and_append(f"  ❌ nodriverインポート失敗: {e}")
+        log_and_append("Phase 3 ステータス: FAILED - Phase 1を再実行してください")
         return "\n".join(results)
     
     log_and_append("")
     
-    # テスト1: Chromiumバージョン確認
-    log_and_append("🔍 テスト1: Chromiumバージョン確認")
+    # テスト1: 非同期環境確認
+    log_and_append("🔄 テスト1: 非同期環境確認")
     try:
-        version_result = subprocess.run(
-            [chromium_path, "--version"], 
-            capture_output=True, text=True, timeout=10
-        )
-        if version_result.returncode == 0:
-            version = version_result.stdout.strip()
-            log_and_append(f"  ✅ バージョン取得成功: {version}")
-        else:
-            log_and_append(f"  ❌ バージョン取得失敗 (return code: {version_result.returncode})")
-            log_and_append(f"    stderr: {version_result.stderr}")
-    except subprocess.TimeoutExpired:
-        log_and_append("  ❌ バージョン確認がタイムアウトしました")
+        import nest_asyncio
+        nest_asyncio.apply()
+        log_and_append("  ✅ nest_asyncio 適用成功")
+        
+        # 現在のイベントループ状況確認
+        try:
+            loop = asyncio.get_event_loop()
+            log_and_append(f"  現在のループ: {type(loop)} (running: {loop.is_running()})")
+        except Exception as e:
+            log_and_append(f"  ループ確認エラー: {e}")
+            
     except Exception as e:
-        log_and_append(f"  ❌ バージョン確認エラー: {e}")
+        log_and_append(f"  ❌ 非同期環境準備エラー: {e}")
     
     log_and_append("")
     
-    # テスト2: 最小設定でのプロセス起動テスト
-    log_and_append("🚀 テスト2: 最小設定での起動テスト")
+    # テスト2: nodriver.start()の詳細テスト
+    log_and_append("🚀 テスト2: nodriver.start()詳細テスト")
     
-    test_cases = [
-        {
-            "name": "基本ヘッドレス",
-            "args": ["--headless", "--no-sandbox", "--disable-gpu"]
-        },
-        {
-            "name": "フルセキュリティ無効",
-            "args": ["--headless", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"]
-        },
-        {
-            "name": "完全最小構成",
-            "args": ["--headless", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", 
-                    "--disable-extensions", "--disable-plugins", "--disable-images"]
-        }
-    ]
-    
-    successful_configs = []
-    
-    for i, test_case in enumerate(test_cases, 1):
-        log_and_append(f"  テスト2-{i}: {test_case['name']}")
-        log_and_append(f"    引数: {' '.join(test_case['args'])}")
-        
+    async def test_nodriver_start():
+        browser = None
         try:
-            # プロセス起動
-            process = subprocess.Popen(
-                [chromium_path] + test_case['args'] + ["--remote-debugging-port=0"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                preexec_fn=os.setsid  # プロセスグループ作成
+            log_and_append("  Step 1: nodriver.start()パラメータ準備")
+            
+            # Phase 2で成功したChromium設定を使用
+            browser_args = [
+                '--headless',
+                '--no-sandbox', 
+                '--disable-gpu',
+                '--disable-dev-shm-usage'
+            ]
+            
+            log_and_append(f"    使用引数: {browser_args}")
+            log_and_append(f"    sandbox: False")
+            log_and_append(f"    headless: True")
+            log_and_append("")
+            
+            log_and_append("  Step 2: nodriver.start()実行開始")
+            log_and_append("    ⏳ ブラウザ起動中...")
+            
+            # nodriver.start()実行
+            browser = await nd.start(
+                headless=True,
+                sandbox=False,
+                browser_args=browser_args
             )
             
-            log_and_append(f"    プロセス起動: PID {process.pid}")
+            log_and_append(f"  Step 3: nodriver.start()戻り値確認")
+            log_and_append(f"    戻り値型: {type(browser)}")
+            log_and_append(f"    戻り値: {browser}")
             
-            # 短時間待機してプロセス状態確認
-            time.sleep(3)
+            if browser is None:
+                log_and_append("    ❌ ERROR: browser is None")
+                return False
             
-            # プロセスがまだ実行中か確認
-            if process.poll() is None:
-                log_and_append("    ✅ プロセス起動成功 (3秒後も実行中)")
-                
-                # psutilでプロセス情報取得
-                try:
-                    proc_info = psutil.Process(process.pid)
-                    log_and_append(f"    プロセス情報: {proc_info.name()}, メモリ: {proc_info.memory_info().rss // 1024 // 1024}MB")
-                except:
-                    log_and_append("    プロセス情報取得に失敗")
-                
-                successful_configs.append(test_case['name'])
-                
-                # プロセス終了
-                try:
-                    os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-                    process.wait(timeout=5)
-                    log_and_append("    ✅ プロセス正常終了")
-                except subprocess.TimeoutExpired:
-                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-                    process.wait()
-                    log_and_append("    ⚠️ プロセス強制終了")
-                except Exception as e:
-                    log_and_append(f"    ❌ プロセス終了エラー: {e}")
-            else:
-                return_code = process.returncode
-                stderr_output = process.stderr.read().decode('utf-8', errors='ignore')
-                log_and_append(f"    ❌ プロセス即座に終了 (return code: {return_code})")
-                if stderr_output:
-                    log_and_append(f"    エラー出力: {stderr_output[:200]}...")
-        
-        except Exception as e:
-            log_and_append(f"    ❌ 起動テストエラー: {e}")
-        
-        log_and_append("")
-    
-    # テスト3: リモートデバッグポート確認
-    log_and_append("🔗 テスト3: リモートデバッグポート機能確認")
-    try:
-        debug_process = subprocess.Popen(
-            [chromium_path, "--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=9222"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            preexec_fn=os.setsid
-        )
-        
-        log_and_append(f"  デバッグモードプロセス起動: PID {debug_process.pid}")
-        time.sleep(2)
-        
-        if debug_process.poll() is None:
-            log_and_append("  ✅ リモートデバッグモード起動成功")
+            log_and_append("    ✅ browser オブジェクト取得成功")
             
-            # ポート9222の使用確認を試行
-            try:
-                import socket
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(1)
-                result = sock.connect_ex(('localhost', 9222))
-                sock.close()
-                if result == 0:
-                    log_and_append("  ✅ デバッグポート9222にアクセス可能")
+            # browserオブジェクトの詳細確認
+            log_and_append("  Step 4: browserオブジェクト詳細確認")
+            log_and_append(f"    クラス: {browser.__class__}")
+            log_and_append(f"    モジュール: {browser.__class__.__module__}")
+            
+            # 主要メソッドの存在確認
+            important_methods = ['get', 'close', 'stop', 'quit']
+            for method in important_methods:
+                if hasattr(browser, method):
+                    log_and_append(f"    ✅ メソッド {method}: {type(getattr(browser, method))}")
                 else:
-                    log_and_append("  ⚠️ デバッグポート9222にアクセス不可（通常動作）")
-            except Exception as e:
-                log_and_append(f"  ⚠️ ポート確認エラー: {e}")
+                    log_and_append(f"    ❌ メソッド {method}: 存在しません")
             
-            # プロセス終了
+            log_and_append("")
+            
+            # テスト3: 最小限のページアクセステスト
+            log_and_append("  Step 5: 最小限のページアクセステスト")
+            
+            # data: URLを使用してローカルHTMLをテスト
+            test_html = "data:text/html,<html><head><title>Test Page</title></head><body><h1>Hello World</h1></body></html>"
+            log_and_append(f"    テストURL: {test_html[:50]}...")
+            
+            log_and_append("    ⏳ browser.get()実行中...")
+            tab = await browser.get(test_html)
+            
+            log_and_append(f"    browser.get()戻り値型: {type(tab)}")
+            log_and_append(f"    browser.get()戻り値: {tab}")
+            
+            if tab is None:
+                log_and_append("    ❌ ERROR: tab is None")
+                return False
+            
+            log_and_append("    ✅ tab オブジェクト取得成功")
+            
+            # tabオブジェクトの詳細確認
+            log_and_append("  Step 6: tabオブジェクト詳細確認")
+            log_and_append(f"    クラス: {tab.__class__}")
+            
+            # タイトル取得テスト
+            log_and_append("    ⏳ ページタイトル取得中...")
             try:
-                os.killpg(os.getpgid(debug_process.pid), signal.SIGTERM)
-                debug_process.wait(timeout=5)
-                log_and_append("  ✅ デバッグプロセス正常終了")
-            except:
-                os.killpg(os.getpgid(debug_process.pid), signal.SIGKILL)
-                debug_process.wait()
-                log_and_append("  ⚠️ デバッグプロセス強制終了")
-        else:
-            log_and_append("  ❌ リモートデバッグモード起動失敗")
+                # タイトル取得方法を複数試行
+                title_methods = [
+                    ('tab.title', lambda: tab.title),
+                    ('tab.get_title()', lambda: tab.get_title() if hasattr(tab, 'get_title') else None),
+                    ('await tab.evaluate("document.title")', lambda: tab.evaluate('document.title'))
+                ]
+                
+                for method_name, method_func in title_methods:
+                    try:
+                        log_and_append(f"      試行: {method_name}")
+                        if 'await' in method_name:
+                            title = await method_func()
+                        else:
+                            title = method_func()
+                        
+                        if title:
+                            log_and_append(f"      ✅ 成功: '{title}'")
+                            break
+                        else:
+                            log_and_append(f"      ⚠️ 空の結果")
+                    except Exception as e:
+                        log_and_append(f"      ❌ 失敗: {e}")
+                
+            except Exception as e:
+                log_and_append(f"    ❌ タイトル取得エラー: {e}")
+            
+            log_and_append("")
+            log_and_append("  ✅ nodriver基本動作テスト成功")
+            return True
+            
+        except Exception as e:
+            log_and_append(f"  ❌ nodriver.start()エラー: {type(e).__name__}: {e}")
+            log_and_append("  詳細スタックトレース:")
+            for line in traceback.format_exc().split('\n'):
+                if line.strip():
+                    log_and_append(f"    {line}")
+            return False
+            
+        finally:
+            # クリーンアップ
+            if browser:
+                try:
+                    log_and_append("  🧹 ブラウザクリーンアップ")
+                    await browser.stop()
+                    log_and_append("  ✅ ブラウザ正常終了")
+                except Exception as e:
+                    log_and_append(f"  ⚠️ ブラウザ終了エラー: {e}")
     
+    # 非同期テストを実行
+    try:
+        # 新しいイベントループで実行
+        success = asyncio.run(test_nodriver_start())
     except Exception as e:
-        log_and_append(f"  ❌ デバッグポートテストエラー: {e}")
+        log_and_append(f"  ❌ 非同期実行エラー: {e}")
+        log_and_append("  詳細スタックトレース:")
+        for line in traceback.format_exc().split('\n'):
+            if line.strip():
+                log_and_append(f"    {line}")
+        success = False
     
     log_and_append("")
     
     # 総合評価
-    log_and_append("📊 Phase 2 総合評価:")
+    log_and_append("📊 Phase 3 総合評価:")
     
-    if len(successful_configs) == 0:
-        log_and_append("  ❌ 失敗: Chromiumプロセス起動に失敗")
-        phase2_status = "FAILED"
-    elif len(successful_configs) < len(test_cases):
-        log_and_append(f"  ⚠️ 部分成功: {len(successful_configs)}/{len(test_cases)} 設定で起動成功")
-        log_and_append(f"    成功設定: {', '.join(successful_configs)}")
-        phase2_status = "PARTIAL"
+    if success:
+        log_and_append("  ✅ 成功: nodriver基本動作確認完了")
+        phase3_status = "PASSED"
     else:
-        log_and_append("  ✅ 成功: 全てのChromium設定で起動成功")
-        phase2_status = "PASSED"
+        log_and_append("  ❌ 失敗: nodriver動作に問題あり")
+        phase3_status = "FAILED"
     
     log_and_append("")
-    log_and_append(f"Phase 2 ステータス: {phase2_status}")
+    log_and_append(f"Phase 3 ステータス: {phase3_status}")
     
-    if phase2_status == "PASSED":
+    if phase3_status == "PASSED":
         log_and_append("")
-        log_and_append("🎉 Phase 2合格！Phase 3に進む準備ができました。")
+        log_and_append("🎉 Phase 3合格！Phase 4に進む準備ができました。")
         log_and_append("ユーザーからの承認をお待ちしています。")
-    elif phase2_status == "PARTIAL":
+    else:
         log_and_append("")
-        log_and_append("⚠️ Phase 2部分合格。問題を修正するか、現状でPhase 3に進むか判断が必要です。")
+        log_and_append("❌ Phase 3で問題が発見されました。")
+        log_and_append("上記のエラー詳細を確認して修正が必要です。")
     
     return "\n".join(results)
 
 # Gradioインターフェース
-with gr.Blocks(title="Phase 2: Chromium起動テスト") as app:
-    gr.Markdown("# 🌐 Phase 2: Chromium起動テスト")
-    gr.Markdown("エルメス商品情報抽出ツールの段階的開発 - Phase 2")
+with gr.Blocks(title="Phase 3: nodriver基本動作テスト") as app:
+    gr.Markdown("# 🚀 Phase 3: nodriver基本動作テスト")
+    gr.Markdown("エルメス商品情報抽出ツールの段階的開発 - Phase 3")
     
     with gr.Row():
-        test_btn = gr.Button("🚀 Chromium起動テストを実行", variant="primary")
+        test_btn = gr.Button("🧪 nodriver基本動作テストを実行", variant="primary")
     
     with gr.Row():
         output = gr.Textbox(
             label="テスト結果",
-            lines=40,
+            lines=50,
             interactive=False,
             show_copy_button=True
         )
     
     test_btn.click(
-        fn=test_chromium_startup,
+        fn=test_nodriver_basic,
         outputs=output
     )
     
     gr.Markdown("""
-    ## Phase 2 の目標
-    - Chromiumバイナリの実行可能性確認
-    - 複数の設定でのプロセス起動テスト  
-    - プロセス管理（起動・終了）の検証
-    - リモートデバッグポート機能の確認
+    ## Phase 3 の目標
+    - nodriver.start()の成功とオブジェクト取得
+    - ローカルHTMLページでの基本動作確認
+    - タイトル取得などの基本的なページ操作
+    - NoneType エラーの根本原因特定
     
     ## 合格基準
-    - 最低1つの設定でChromiumプロセス起動成功
-    - プロセス管理が正常に動作
-    - 全ての基本テストで ✅ が表示される
+    - nodriver.start()でブラウザオブジェクト取得成功
+    - browser.get()でタブオブジェクト取得成功
+    - 基本的なページ操作（タイトル取得等）成功
+    
+    ## 前提条件
+    - Phase 1: 基本環境テスト合格済み
+    - Phase 2: Chromium起動テスト合格済み
     
     ## 注意事項
-    - Phase 1が合格していることが前提
-    - Chromiumプロセスは自動的に適切に終了されます
+    - このテストでNoneTypeエラーの根本原因が特定される予定です
     """)
 
 if __name__ == "__main__":
