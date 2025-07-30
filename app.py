@@ -427,24 +427,22 @@ def test_hermes_site_scraping():
                         # エルメス特有のJSON データ抽出方式
                         log_and_append(f"      エルメス特化: JSON データ抽出を試行")
                         
-                        # Step 1: JSON構造の完全デバッグ（外部指摘対応）
-                        debug_script = '''
+                        # 【重要修正】hermes-state の直接RAW取得
+                        log_and_append(f"      🎯 hermes-state RAW内容取得:")
+                        
+                        raw_hermes_data = await tab.evaluate('''
                         (function() {
                             try {
                                 const hermesStateScript = document.getElementById('hermes-state');
                                 if (hermesStateScript) {
-                                    const jsonText = hermesStateScript.textContent;
-                                    const jsonData = JSON.parse(jsonText);
-                                    
+                                    const rawText = hermesStateScript.textContent;
                                     return {
                                         success: true,
-                                        debug: {
-                                            jsonSize: jsonText.length,
-                                            dataType: Array.isArray(jsonData) ? 'array' : typeof jsonData,
-                                            topLevelKeys: Array.isArray(jsonData) ? `array[${jsonData.length}]` : Object.keys(jsonData),
-                                            firstElement: Array.isArray(jsonData) ? (jsonData[0] ? Object.keys(jsonData[0]) : 'empty') : 'not array',
-                                            rawSample: JSON.stringify(jsonData).substring(0, 500)
-                                        }
+                                        exists: true,
+                                        size: rawText.length,
+                                        first_500_chars: rawText.substring(0, 500),
+                                        last_200_chars: rawText.substring(Math.max(0, rawText.length - 200)),
+                                        raw_content: rawText  // 完全な生データ
                                     };
                                 } else {
                                     return { success: false, error: 'hermes-state script not found' };
@@ -453,21 +451,82 @@ def test_hermes_site_scraping():
                                 return { success: false, error: error.message };
                             }
                         })()
-                        '''
+                        ''')
                         
-                        debug_result = await tab.evaluate(debug_script)
-                        log_and_append(f"      📊 JSON構造デバッグ結果:")
-                        log_and_append(f"        成功: {debug_result.get('success')}")
-                        
-                        if debug_result.get('success'):
-                            debug_info = debug_result['debug']
-                            log_and_append(f"        JSONサイズ: {debug_info['jsonSize']}文字")
-                            log_and_append(f"        データ型: {debug_info['dataType']}")
-                            log_and_append(f"        トップレベルキー: {debug_info['topLevelKeys']}")
-                            log_and_append(f"        第1要素キー: {debug_info['firstElement']}")
-                            log_and_append(f"        RAWサンプル: {debug_info['rawSample']}")
+                        if isinstance(raw_hermes_data, dict) and raw_hermes_data.get('success'):
+                            log_and_append(f"        ✅ hermes-state発見")
+                            log_and_append(f"        サイズ: {raw_hermes_data['size']}文字")
+                            log_and_append(f"        開始500文字: '{raw_hermes_data['first_500_chars']}'")
+                            log_and_append(f"        終端200文字: '{raw_hermes_data['last_200_chars']}'")
+                            
+                            # 実際のJSONパース試行
+                            raw_content = raw_hermes_data.get('raw_content', '')
+                            if raw_content and len(raw_content) > 10:
+                                try:
+                                    import json
+                                    actual_json_data = json.loads(raw_content)
+                                    log_and_append(f"        ✅ JSON パース成功")
+                                    log_and_append(f"        JSON型: {type(actual_json_data)}")
+                                    
+                                    if isinstance(actual_json_data, dict):
+                                        log_and_append(f"        トップレベルキー: {list(actual_json_data.keys())}")
+                                        
+                                        # 商品データ探索
+                                        if 'products' in actual_json_data:
+                                            products = actual_json_data['products']
+                                            log_and_append(f"        🎯 products発見: {type(products)}")
+                                            
+                                            if isinstance(products, dict) and 'items' in products:
+                                                items = products['items']
+                                                total = products.get('total', len(items) if isinstance(items, list) else 0)
+                                                log_and_append(f"        ✅ 商品データ構造確認:")
+                                                log_and_append(f"          総数: {total}")
+                                                log_and_append(f"          アイテム型: {type(items)}")
+                                                log_and_append(f"          アイテム数: {len(items) if isinstance(items, list) else 'N/A'}")
+                                                
+                                                if isinstance(items, list) and len(items) > 0:
+                                                    first_item = items[0]
+                                                    log_and_append(f"          第1商品キー: {list(first_item.keys()) if isinstance(first_item, dict) else 'N/A'}")
+                                                    
+                                                    # 実際の商品情報サンプル表示
+                                                    sample_products = []
+                                                    for i, item in enumerate(items[:3]):
+                                                        if isinstance(item, dict):
+                                                            product_info = {
+                                                                'title': item.get('title', item.get('name', 'N/A')),
+                                                                'url': item.get('url', item.get('link', 'N/A')),
+                                                                'price': item.get('price', 'N/A'),
+                                                                'sku': item.get('sku', item.get('id', 'N/A'))
+                                                            }
+                                                            sample_products.append(product_info)
+                                                            log_and_append(f"          商品{i+1}: {product_info['title']}")
+                                                            log_and_append(f"            URL: {product_info['url']}")
+                                                            log_and_append(f"            価格: {product_info['price']}")
+                                                    
+                                                    if sample_products:
+                                                        log_and_append(f"        🎉 商品情報抽出完全成功! {len(sample_products)}件サンプル取得")
+                                                        extraction_success = True
+                                                        break
+                                            else:
+                                                log_and_append(f"        ⚠️ products.items構造が異なる: {products}")
+                                        else:
+                                            log_and_append(f"        ⚠️ products キーが存在しない")
+                                            # 他の可能なキーを探索
+                                            possible_keys = [k for k in actual_json_data.keys() if 'product' in k.lower() or 'item' in k.lower() or 'result' in k.lower()]
+                                            if possible_keys:
+                                                log_and_append(f"        可能性のあるキー: {possible_keys}")
+                                    else:
+                                        log_and_append(f"        ⚠️ JSONが辞書型ではない: {type(actual_json_data)}")
+                                        
+                                except json.JSONDecodeError as json_error:
+                                    log_and_append(f"        ❌ JSON パースエラー: {json_error}")
+                                except Exception as parse_error:
+                                    log_and_append(f"        ❌ データ処理エラー: {parse_error}")
+                            else:
+                                log_and_append(f"        ❌ hermes-state内容が空または短すぎる")
                         else:
-                            log_and_append(f"        エラー: {debug_result.get('error')}")
+                            error_msg = raw_hermes_data.get('error', 'Unknown error') if isinstance(raw_hermes_data, dict) else str(raw_hermes_data)
+                            log_and_append(f"        ❌ hermes-state取得エラー: {error_msg}")
                         
                         # Step 2: 構造に応じた商品データ抽出（改善版）
                         json_extraction_script = '''
