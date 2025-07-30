@@ -457,6 +457,17 @@ def test_hermes_site_scraping():
                         def extract_raw_content_from_nodriver(data):
                             """nodriverが返すリスト形式からraw_contentを抽出"""
                             log_and_append(f"        [DEBUG] nodriverデータ型: {type(data)}")
+                            
+                            # デバッグ用: 生データを保存
+                            try:
+                                import json
+                                debug_filename = f"debug_nodriver_data_{time.strftime('%Y%m%d_%H%M%S')}.json"
+                                with open(debug_filename, 'w', encoding='utf-8') as f:
+                                    json.dump(data, f, ensure_ascii=False, indent=2)
+                                log_and_append(f"        [DEBUG] 生データ保存: {debug_filename}")
+                            except Exception as e:
+                                log_and_append(f"        [DEBUG] 生データ保存エラー: {e}")
+                            
                             if isinstance(data, dict):
                                 # 通常の辞書形式
                                 return data
@@ -501,6 +512,16 @@ def test_hermes_site_scraping():
                                     actual_json_data = json.loads(raw_content)
                                     log_and_append(f"        ✅ JSON パース成功")
                                     log_and_append(f"        JSON型: {type(actual_json_data)}")
+                                    
+                                    # hermes-state JSONを保存
+                                    try:
+                                        hermes_json_filename = f"hermes_state_json_{time.strftime('%Y%m%d_%H%M%S')}.json"
+                                        with open(hermes_json_filename, 'w', encoding='utf-8') as f:
+                                            json.dump(actual_json_data, f, ensure_ascii=False, indent=2)
+                                        log_and_append(f"        💾 hermes-state JSON保存: {hermes_json_filename}")
+                                        log_and_append(f"        📥 ダウンロード可能なファイルが作成されました")
+                                    except Exception as save_error:
+                                        log_and_append(f"        ⚠️ JSON保存エラー: {save_error}")
                                     
                                     if isinstance(actual_json_data, dict):
                                         log_and_append(f"        トップレベルキー: {list(actual_json_data.keys())[:5]}")  # 最初の5キーのみ表示
@@ -953,7 +974,23 @@ def test_hermes_site_scraping():
         log_and_append("❌ Phase 6で問題が発見されました。")
         log_and_append("エルメスサイトのアクセス制限またはセキュリティ対策の確認が必要です。")
     
+    # 保存されたファイルのリストを表示
+    log_and_append("")
+    log_and_append("📁 デバッグ用ファイル:")
+    import glob
+    for json_file in glob.glob("*.json"):
+        log_and_append(f"  - {json_file}")
+    
     return "\n".join(results)
+
+# ファイルダウンロード用の関数
+def get_json_files():
+    """保存されたJSONファイルのリストを返す"""
+    import glob
+    json_files = glob.glob("*.json")
+    if json_files:
+        return json_files
+    return None
 
 # Gradioインターフェース
 with gr.Blocks(title="Phase 6: エルメスサイト特化テスト") as app:
@@ -971,9 +1008,30 @@ with gr.Blocks(title="Phase 6: エルメスサイト特化テスト") as app:
             show_copy_button=True
         )
     
+    with gr.Row():
+        gr.Markdown("### 📥 デバッグファイルダウンロード")
+    
+    with gr.Row():
+        file_output = gr.File(
+            label="JSONファイル",
+            file_count="multiple",
+            interactive=False
+        )
+        refresh_btn = gr.Button("🔄 ファイルリスト更新")
+    
+    def run_test_and_update_files():
+        result = test_hermes_site_scraping()
+        files = get_json_files()
+        return result, files
+    
     test_btn.click(
-        fn=test_hermes_site_scraping,
-        outputs=output
+        fn=run_test_and_update_files,
+        outputs=[output, file_output]
+    )
+    
+    refresh_btn.click(
+        fn=get_json_files,
+        outputs=file_output
     )
     
     gr.Markdown("""
