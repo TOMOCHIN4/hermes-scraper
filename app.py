@@ -173,47 +173,106 @@ def test_hermes_site_scraping():
                     try:
                         tab = page['tab']
                         
-                        # エルメス特有のセレクタで商品情報を探索
-                        product_selectors = [
-                            "article[data-product]",  # 一般的な商品記事
-                            ".product-item",          # 商品アイテム
-                            ".product-card",          # 商品カード
-                            "[data-testid*=\"product\"]", # テストID付き商品
-                            ".grid-item",             # グリッドアイテム
-                            ".product-tile"           # 商品タイル
-                        ]
+                        # エルメス特有のJSON データ抽出方式
+                        log_and_append(f"      エルメス特化: JSON データ抽出を試行")
                         
-                        for selector in product_selectors:
-                            try:
-                                count_script = f"document.querySelectorAll('{selector}').length"
-                                count = await tab.evaluate(count_script)
-                                log_and_append(f"      セレクタ '{selector}': {count}件")
-                                
-                                if count > 0:
-                                    # 商品情報詳細取得を試行
-                                    detail_script = f'''
-                                    (function() {{
-                                        const items = Array.from(document.querySelectorAll('{selector}'));
-                                        return items.slice(0, 3).map((item, index) => {{
-                                            return {{
-                                                index: index + 1,
-                                                tagName: item.tagName,
-                                                className: item.className,
-                                                innerHTML: item.innerHTML.substring(0, 200),
-                                                textContent: item.textContent.substring(0, 100)
-                                            }};
-                                        }});
-                                    }})()
-                                    '''
+                        # Method 1: hermes-state スクリプトからJSON抽出
+                        json_extraction_script = '''
+                        (function() {
+                            try {
+                                // hermes-state スクリプト要素を探索
+                                const hermesStateScript = document.getElementById('hermes-state');
+                                if (hermesStateScript) {
+                                    const jsonData = JSON.parse(hermesStateScript.textContent);
                                     
-                                    details = await tab.evaluate(detail_script)
-                                    if details and len(details) > 0:
-                                        log_and_append(f"      ✅ 商品要素詳細取得成功: {len(details)}件")
+                                    // 商品データの探索
+                                    let productData = null;
+                                    
+                                    // パターン1: products.items
+                                    if (jsonData.products && jsonData.products.items) {
+                                        productData = {
+                                            total: jsonData.products.total || jsonData.products.items.length,
+                                            items: jsonData.products.items.slice(0, 5).map(item => ({
+                                                title: item.title,
+                                                url: item.url,
+                                                sku: item.sku,
+                                                price: item.price
+                                            }))
+                                        };
+                                    }
+                                    
+                                    // パターン2: 直接的な products 配列
+                                    else if (Array.isArray(jsonData.products)) {
+                                        productData = {
+                                            total: jsonData.products.length,
+                                            items: jsonData.products.slice(0, 5).map(item => ({
+                                                title: item.title,
+                                                url: item.url,
+                                                sku: item.sku,
+                                                price: item.price
+                                            }))
+                                        };
+                                    }
+                                    
+                                    if (productData) {
+                                        return { success: true, data: productData };
+                                    } else {
+                                        return { success: false, error: 'Product data structure not found', keys: Object.keys(jsonData) };
+                                    }
+                                } else {
+                                    return { success: false, error: 'hermes-state script not found' };
+                                }
+                            } catch (error) {
+                                return { success: false, error: error.message };
+                            }
+                        })()
+                        '''
+                        
+                        try:
+                            json_result = await tab.evaluate(json_extraction_script)
+                            
+                            if json_result.get('success'):
+                                product_data = json_result['data']
+                                total_count = product_data['total']
+                                items = product_data['items']
+                                
+                                log_and_append(f"      ✅ JSON商品データ抽出成功!")
+                                log_and_append(f"      総商品数: {total_count}")
+                                log_and_append(f"      サンプル商品: {len(items)}件")
+                                
+                                for i, item in enumerate(items, 1):
+                                    log_and_append(f"        {i}. {item['title']}")
+                                    log_and_append(f"           URL: {item['url']}")
+                                    log_and_append(f"           SKU: {item['sku']}")
+                                    if item['price']:
+                                        log_and_append(f"           価格: {item['price']}")
+                                
+                                extraction_success = True
+                                break
+                                
+                            else:
+                                error_msg = json_result.get('error', 'Unknown error')
+                                log_and_append(f"      ⚠️ JSON抽出失敗: {error_msg}")
+                                
+                                if 'keys' in json_result:
+                                    log_and_append(f"      利用可能なキー: {json_result['keys']}")
+                                
+                                # フォールバック: 標準セレクタも試行
+                                log_and_append(f"      フォールバック: 標準セレクタを試行")
+                                
+                                fallback_selectors = ["h-grid-result-item", ".grid-item", "article"]
+                                for selector in fallback_selectors:
+                                    count_script = f"document.querySelectorAll('{selector}').length"
+                                    count = await tab.evaluate(count_script)
+                                    log_and_append(f"        セレクタ '{selector}': {count}件")
+                                    
+                                    if count > 0:
+                                        log_and_append(f"      ✅ フォールバック成功: {selector}で{count}件発見")
                                         extraction_success = True
                                         break
-                                        
-                            except Exception as selector_error:
-                                log_and_append(f"      ⚠️ セレクタ '{selector}' エラー: {selector_error}")
+                        
+                        except Exception as json_error:
+                            log_and_append(f"      ❌ JSON抽出エラー: {json_error}")
                         
                         if extraction_success:
                             break
