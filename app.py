@@ -178,7 +178,7 @@ def test_hermes_site_scraping():
                             "article[data-product]",  # 一般的な商品記事
                             ".product-item",          # 商品アイテム
                             ".product-card",          # 商品カード
-                            "[data-testid*='product']", # テストID付き商品
+                            "[data-testid*=\"product\"]", # テストID付き商品
                             ".grid-item",             # グリッドアイテム
                             ".product-tile"           # 商品タイル
                         ]
@@ -282,7 +282,9 @@ def test_hermes_site_scraping():
             log_and_append("📊 エルメスサイト特化テスト結果:")
             log_and_append(f"  サイト接続: {successful_connections}/{len(hermes_urls)}")
             log_and_append(f"  商品抽出: {'成功' if extraction_success else '要改善'}")
-            log_and_append(f"  セキュリティ: {len([k for k, v in security_checks.items() if not v])}/{len(security_checks)}項目OK")
+            security_ok_count = len([k for k, v in security_checks.items() if not v]) if isinstance(security_checks, dict) else 0
+            security_total = len(security_checks) if isinstance(security_checks, dict) else 0
+            log_and_append(f"  セキュリティ: {security_ok_count}/{security_total}項目OK")
             
             # 成功判定（接続成功があれば基本的にOK）
             hermes_success = successful_connections > 0
