@@ -303,7 +303,11 @@ async def test_hermes_site_scraping():
   - PythonのJSONパーサー使用に変更
   - メタデータとの混同を回避
   - 商品データ構造の詳細ロギング追加
-  - Hugging Face Spaceにデプロイ済み
+  - nodriverのリスト形式データへの完全対応
+  - エルメス特有のJSON構造（数値キー->b->products）に対応
+  - extract_raw_content_from_nodriver()関数実装
+  - デバッグログ強化
+  - Hugging Face Spaceにデプロイ済み（2回目）
 
 ### 次のアクション
 1. Phase 6: エルメスサイト特化テストの結果確認
