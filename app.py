@@ -207,108 +207,175 @@ def test_hermes_site_scraping():
                             })()
                             ''')
                             
+                            # nodriverの戻り値を安全に処理
+                            def safe_get(data, key, default='N/A'):
+                                """nodriverの戻り値から安全にデータを取得"""
+                                try:
+                                    if isinstance(data, dict):
+                                        return data.get(key, default)
+                                    elif isinstance(data, list) and len(data) > 0:
+                                        # nodriverが配列で返す場合の処理
+                                        for item in data:
+                                            if isinstance(item, dict) and key in item:
+                                                return item[key]
+                                        return default
+                                    else:
+                                        return default
+                                except:
+                                    return default
+                            
                             log_and_append(f"    📄 ページコンテンツ分析:")
-                            log_and_append(f"      テキスト長: {page_analysis['contentLength']}文字")
-                            log_and_append(f"      HTML長: {page_analysis['htmlLength']}文字") 
-                            log_and_append(f"      子要素数: {page_analysis['childElementCount']}個")
-                            log_and_append(f"      スクリプト数: {page_analysis['hasScripts']}個")
-                            log_and_append(f"      Angular検出: {page_analysis['hasAngular']}")
-                            log_and_append(f"      ページ状態: {page_analysis['page_ready_state']}")
+                            log_and_append(f"      データ型: {type(page_analysis)}")
                             
-                            # 【重要】セキュリティ・ブロック検出
-                            security = page_analysis['security_indicators']
-                            log_and_append(f"    🛡️ セキュリティ状況:")
-                            log_and_append(f"      CAPTCHA: {security['captcha']}")
-                            log_and_append(f"      Cloudflare: {security['cloudflare']}")
-                            log_and_append(f"      ブロック検出: {security['blocked_text']}")
-                            log_and_append(f"      Bot検出: {security['bot_detected']}")
-                            
-                            # コンテンツサンプル表示
-                            if page_analysis['visible_text_sample']:
-                                log_and_append(f"    📝 表示テキストサンプル:")
-                                log_and_append(f"      '{page_analysis['visible_text_sample']}'")
+                            if isinstance(page_analysis, dict):
+                                log_and_append(f"      テキスト長: {safe_get(page_analysis, 'contentLength')}文字")
+                                log_and_append(f"      HTML長: {safe_get(page_analysis, 'htmlLength')}文字") 
+                                log_and_append(f"      子要素数: {safe_get(page_analysis, 'childElementCount')}個")
+                                log_and_append(f"      スクリプト数: {safe_get(page_analysis, 'hasScripts')}個")
+                                log_and_append(f"      Angular検出: {safe_get(page_analysis, 'hasAngular')}")
+                                log_and_append(f"      ページ状態: {safe_get(page_analysis, 'page_ready_state')}")
+                                
+                                # 【重要】セキュリティ・ブロック検出
+                                security = safe_get(page_analysis, 'security_indicators', {})
+                                if isinstance(security, dict):
+                                    log_and_append(f"    🛡️ セキュリティ状況:")
+                                    log_and_append(f"      CAPTCHA: {safe_get(security, 'captcha')}")
+                                    log_and_append(f"      Cloudflare: {safe_get(security, 'cloudflare')}")
+                                    log_and_append(f"      ブロック検出: {safe_get(security, 'blocked_text')}")
+                                    log_and_append(f"      Bot検出: {safe_get(security, 'bot_detected')}")
+                                
+                                # コンテンツサンプル表示
+                                sample = safe_get(page_analysis, 'visible_text_sample')
+                                if sample and sample != 'N/A':
+                                    log_and_append(f"    📝 表示テキストサンプル:")
+                                    log_and_append(f"      '{sample}'")
+                            else:
+                                log_and_append(f"      ⚠️ 予期しないデータ形式: {page_analysis}")
                             
                             # hermes-state スクリプトの詳細確認
                             hermes_state_analysis = await tab.evaluate('''
                             (function() {
-                                const script = document.getElementById('hermes-state');
-                                if (script) {
-                                    const content = script.textContent;
-                                    return {
-                                        exists: true,
-                                        size: content.length,
-                                        type: script.type,
-                                        first_100_chars: content.substring(0, 100),
-                                        last_100_chars: content.length > 100 ? content.substring(content.length - 100) : '',
-                                        looks_like_json: content.trim().startsWith('{') || content.trim().startsWith('[')
-                                    };
-                                } else {
-                                    // 他のスクリプトタグも確認
-                                    const all_scripts = Array.from(document.scripts);
-                                    const json_scripts = all_scripts.filter(s => 
-                                        s.type === 'application/json' || 
-                                        s.id.includes('state') || 
-                                        s.id.includes('data')
-                                    );
-                                    
-                                    return {
-                                        exists: false,
-                                        total_scripts: all_scripts.length,
-                                        json_scripts: json_scripts.map(s => ({id: s.id, type: s.type, size: s.textContent.length}))
-                                    };
+                                try {
+                                    const script = document.getElementById('hermes-state');
+                                    if (script) {
+                                        const content = script.textContent;
+                                        return {
+                                            exists: true,
+                                            size: content.length,
+                                            type: script.type,
+                                            first_100_chars: content.substring(0, 100),
+                                            last_100_chars: content.length > 100 ? content.substring(content.length - 100) : '',
+                                            looks_like_json: content.trim().startsWith('{') || content.trim().startsWith('[')
+                                        };
+                                    } else {
+                                        // 他のスクリプトタグも確認
+                                        const all_scripts = Array.from(document.scripts);
+                                        const json_scripts = all_scripts.filter(s => 
+                                            s.type === 'application/json' || 
+                                            (s.id && (s.id.includes('state') || s.id.includes('data')))
+                                        );
+                                        
+                                        return {
+                                            exists: false,
+                                            total_scripts: all_scripts.length,
+                                            json_scripts: json_scripts.map(s => ({
+                                                id: s.id || 'no-id', 
+                                                type: s.type || 'no-type', 
+                                                size: s.textContent ? s.textContent.length : 0
+                                            }))
+                                        };
+                                    }
+                                } catch (error) {
+                                    return { error: error.message };
                                 }
                             })()
                             ''')
                             
                             log_and_append(f"    📜 hermes-state スクリプト分析:")
-                            if hermes_state_analysis['exists']:
-                                log_and_append(f"      ✅ 存在確認")
-                                log_and_append(f"      サイズ: {hermes_state_analysis['size']}文字")
-                                log_and_append(f"      タイプ: {hermes_state_analysis['type']}")
-                                log_and_append(f"      JSON形式: {hermes_state_analysis['looks_like_json']}")
-                                log_and_append(f"      開始100文字: '{hermes_state_analysis['first_100_chars']}'")
-                                if hermes_state_analysis['last_100_chars']:
-                                    log_and_append(f"      終端100文字: '{hermes_state_analysis['last_100_chars']}'")
-                            else:
-                                log_and_append(f"      ❌ hermes-state not found")
-                                log_and_append(f"      総スクリプト数: {hermes_state_analysis['total_scripts']}")
-                                log_and_append(f"      JSONスクリプト: {hermes_state_analysis['json_scripts']}")
                             
-                            # Angular/DOM要素の詳細確認
-                            dom_analysis = await tab.evaluate('''
-                            (function() {
-                                const selectors_to_check = [
-                                    'h-root', 'h-grid-results', 'h-grid-result-item', 'h-grid-page',
-                                    '.product-grid-list', '.search-results', '[data-testid="product-grid"]',
-                                    '.product-item', '.product-card', 'article'
-                                ];
-                                
-                                const results = {};
-                                selectors_to_check.forEach(selector => {
-                                    const elements = document.querySelectorAll(selector);
-                                    results[selector] = {
-                                        count: elements.length,
-                                        first_element_info: elements[0] ? {
-                                            tagName: elements[0].tagName,
-                                            className: elements[0].className,
-                                            innerText_length: elements[0].innerText ? elements[0].innerText.length : 0
-                                        } : null
-                                    };
-                                });
-                                
-                                return results;
-                            })()
-                            ''')
-                            
-                            log_and_append(f"    🔍 DOM要素詳細分析:")
-                            for selector, info in dom_analysis.items():
-                                if info['count'] > 0:
-                                    log_and_append(f"      ✅ {selector}: {info['count']}個")
-                                    if info['first_element_info']:
-                                        first = info['first_element_info']
-                                        log_and_append(f"        第1要素: {first['tagName']}.{first['className']} ({first['innerText_length']}文字)")
+                            # 安全なデータアクセス
+                            if isinstance(hermes_state_analysis, dict):
+                                if safe_get(hermes_state_analysis, 'exists') == True:
+                                    log_and_append(f"      ✅ 存在確認")
+                                    log_and_append(f"      サイズ: {safe_get(hermes_state_analysis, 'size')}文字")
+                                    log_and_append(f"      タイプ: {safe_get(hermes_state_analysis, 'type')}")
+                                    log_and_append(f"      JSON形式: {safe_get(hermes_state_analysis, 'looks_like_json')}")
+                                    log_and_append(f"      開始100文字: '{safe_get(hermes_state_analysis, 'first_100_chars')}'")
+                                    last_chars = safe_get(hermes_state_analysis, 'last_100_chars')
+                                    if last_chars and last_chars != 'N/A':
+                                        log_and_append(f"      終端100文字: '{last_chars}'")
+                                elif safe_get(hermes_state_analysis, 'exists') == False:
+                                    log_and_append(f"      ❌ hermes-state not found")
+                                    log_and_append(f"      総スクリプト数: {safe_get(hermes_state_analysis, 'total_scripts')}")
+                                    json_scripts = safe_get(hermes_state_analysis, 'json_scripts', [])
+                                    log_and_append(f"      JSONスクリプト: {json_scripts}")
                                 else:
-                                    log_and_append(f"      ❌ {selector}: 0個")
+                                    error_msg = safe_get(hermes_state_analysis, 'error')
+                                    if error_msg != 'N/A':
+                                        log_and_append(f"      ⚠️ スクリプト分析エラー: {error_msg}")
+                            else:
+                                log_and_append(f"      ⚠️ 予期しないスクリプト分析データ形式: {type(hermes_state_analysis)}")
+                            
+                            # Angular/DOM要素の詳細確認（安全版）
+                            try:
+                                dom_analysis = await tab.evaluate('''
+                                (function() {
+                                    try {
+                                        const selectors_to_check = [
+                                            'h-root', 'h-grid-results', 'h-grid-result-item', 'h-grid-page',
+                                            '.product-grid-list', '.search-results', '[data-testid="product-grid"]',
+                                            '.product-item', '.product-card', 'article'
+                                        ];
+                                        
+                                        const results = {};
+                                        selectors_to_check.forEach(selector => {
+                                            try {
+                                                const elements = document.querySelectorAll(selector);
+                                                results[selector] = {
+                                                    count: elements.length,
+                                                    first_element_info: elements[0] ? {
+                                                        tagName: elements[0].tagName,
+                                                        className: elements[0].className || '',
+                                                        innerText_length: elements[0].innerText ? elements[0].innerText.length : 0
+                                                    } : null
+                                                };
+                                            } catch (e) {
+                                                results[selector] = { error: e.message };
+                                            }
+                                        });
+                                        
+                                        return results;
+                                    } catch (error) {
+                                        return { global_error: error.message };
+                                    }
+                                })()
+                                ''')
+                                
+                                log_and_append(f"    🔍 DOM要素詳細分析:")
+                                if isinstance(dom_analysis, dict):
+                                    if 'global_error' in dom_analysis:
+                                        log_and_append(f"      ❌ DOM分析全体エラー: {dom_analysis['global_error']}")
+                                    else:
+                                        for selector, info in dom_analysis.items():
+                                            if isinstance(info, dict):
+                                                if 'error' in info:
+                                                    log_and_append(f"      ⚠️ {selector}: エラー - {info['error']}")
+                                                elif safe_get(info, 'count', 0) > 0:
+                                                    count = safe_get(info, 'count')
+                                                    log_and_append(f"      ✅ {selector}: {count}個")
+                                                    first_info = safe_get(info, 'first_element_info')
+                                                    if isinstance(first_info, dict):
+                                                        tag = safe_get(first_info, 'tagName')
+                                                        class_name = safe_get(first_info, 'className') 
+                                                        text_len = safe_get(first_info, 'innerText_length')
+                                                        log_and_append(f"        第1要素: {tag}.{class_name} ({text_len}文字)")
+                                                else:
+                                                    log_and_append(f"      ❌ {selector}: 0個")
+                                else:
+                                    log_and_append(f"      ⚠️ DOM分析データ型エラー: {type(dom_analysis)}")
+                                    
+                            except Exception as dom_error:
+                                log_and_append(f"    ❌ DOM要素分析エラー: {dom_error}")
                             
                             successful_connections += 1
                             accessible_pages.append({
