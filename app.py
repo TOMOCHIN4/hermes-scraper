@@ -17,41 +17,83 @@ async def extract_hermes_products(search_term=""):
     """エルメス公式サイトから商品情報を抽出する"""
     browser = None
     try:
-        print("ブラウザ起動を開始...")
-        # プライベートモード（シークレットモード）でブラウザを起動
-        browser = await nd.start(
-            headless=True,
-            sandbox=False,  # Docker環境では必須
-            browser_args=[
-                '--incognito',  # プライベートモード
-                '--no-sandbox',
-                '--disable-dev-shm-usage', 
-                '--disable-gpu',
-                '--disable-extensions',
-                '--disable-plugins',
-                '--disable-images',
-                '--disable-web-security',
-                '--disable-features=VizDisplayCompositor',
-                '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-            ]
-        )
+        print("=== デバッグ開始 ===")
+        print(f"Python version: {sys.version}")
+        print(f"nodriver version: {nd.__version__ if hasattr(nd, '__version__') else 'unknown'}")
+        print(f"Current working directory: {os.getcwd()}")
+        print(f"Environment variables: DISPLAY={os.environ.get('DISPLAY', 'not set')}")
+        
+        print("\n1. ブラウザ起動パラメータ準備中...")
+        
+        browser_args = [
+            '--incognito',  # プライベートモード
+            '--no-sandbox',
+            '--disable-dev-shm-usage', 
+            '--disable-gpu',
+            '--disable-extensions',
+            '--disable-plugins',
+            '--disable-images',
+            '--disable-web-security',
+            '--disable-features=VizDisplayCompositor',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-renderer-backgrounding',
+            '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+        ]
+        
+        print(f"Browser args: {browser_args}")
+        
+        print("\n2. nodriver.start() 呼び出し開始...")
+        try:
+            browser = await nd.start(
+                headless=True,
+                sandbox=False,  # Docker環境では必須
+                browser_args=browser_args
+            )
+            print(f"nodriver.start() 戻り値: {type(browser)} - {browser}")
+        except Exception as start_error:
+            print(f"nodriver.start() でエラー: {type(start_error).__name__}: {start_error}")
+            import traceback
+            traceback.print_exc()
+            raise
         
         if browser is None:
-            raise Exception("ブラウザの起動に失敗しました")
+            print("ERROR: browser is None after nd.start()")
+            raise Exception("ブラウザの起動に失敗しました - browser is None")
         
-        print("ブラウザ起動成功、ページアクセス開始...")
+        print(f"3. ブラウザ起動成功! Browser object: {browser}")
+        print(f"Browser type: {type(browser)}")
+        print(f"Browser attributes: {dir(browser)}")
+        
+        print("\n4. ページアクセス準備中...")
         
         # エルメス公式サイトのバッグページにアクセス
         base_url = "https://www.hermes.com/jp/ja/category/women/bags-and-small-leather-goods/bags-and-clutches/"
         print(f"アクセス先URL: {base_url}")
         
-        tab = await browser.get(base_url)
-        if tab is None:
-            raise Exception("ページの取得に失敗しました")
+        print("\n5. browser.get() 呼び出し開始...")
+        try:
+            print(f"browser.get() を呼び出し中... browser={browser}")
+            tab = await browser.get(base_url)
+            print(f"browser.get() 戻り値: {type(tab)} - {tab}")
+        except Exception as get_error:
+            print(f"browser.get() でエラー: {type(get_error).__name__}: {get_error}")
+            import traceback
+            traceback.print_exc()
+            raise
         
-        print("ページアクセス成功、読み込み待機中...")
+        if tab is None:
+            print("ERROR: tab is None after browser.get()")
+            raise Exception("ページの取得に失敗しました - tab is None")
+        
+        print(f"6. ページアクセス成功! Tab object: {tab}")
+        print(f"Tab type: {type(tab)}")
+        print(f"Tab attributes: {dir(tab) if hasattr(tab, '__dict__') else 'no attributes'}")
+        
+        print("\n7. ページ読み込み待機中...")
         # ページの読み込みを待つ
         await asyncio.sleep(8)
+        print("8. 待機完了")
         
         # JavaScriptで商品情報を抽出
         products_script = """
@@ -109,43 +151,76 @@ async def extract_hermes_products(search_term=""):
         """
         
         # 商品情報を抽出
-        print("JavaScript実行開始...")
-        products = await tab.evaluate(products_script)
-        print(f"抽出した商品数: {len(products) if products else 0}")
+        print("\n9. JavaScript実行開始...")
+        try:
+            print(f"tab.evaluate() を呼び出し中... tab={tab}")
+            products = await tab.evaluate(products_script)
+            print(f"tab.evaluate() 戻り値: {type(products)} - {products}")
+        except Exception as eval_error:
+            print(f"tab.evaluate() でエラー: {type(eval_error).__name__}: {eval_error}")
+            import traceback
+            traceback.print_exc()
+            raise
+        
+        print(f"10. JavaScript実行完了! 抽出した商品数: {len(products) if products else 0}")
+        if products:
+            print(f"商品サンプル (最初の3件): {products[:3]}")
+        else:
+            print("商品が抽出されませんでした")
         
         # フィルタリング
+        print("\n11. フィルタリング開始...")
         if search_term:
+            print(f"検索キーワード: '{search_term}'")
             filtered_products = [
                 product for product in products 
                 if search_term.lower() in product['name'].lower()
             ]
+            print(f"フィルタリング後: {len(filtered_products)} 商品")
         else:
+            print("検索キーワードなし、全商品を対象")
             filtered_products = products
         
-        return {
+        result = {
             'success': True,
             'total_products': len(filtered_products),
             'products': filtered_products[:20],
             'message': f'合計 {len(filtered_products)} 商品が見つかりました'
         }
         
+        print(f"12. 処理完了! 戻り値: {result}")
+        return result
+        
     except Exception as e:
+        error_message = f'エラーが発生しました: {str(e)}'
+        print(f"\n=== エラー発生 ===")
+        print(f"エラータイプ: {type(e).__name__}")
+        print(f"エラーメッセージ: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        print("=== エラー終了 ===")
+        
         return {
             'success': False,
             'error': str(e),
             'total_products': 0,
             'products': [],
-            'message': f'エラーが発生しました: {str(e)}'
+            'message': error_message
         }
     finally:
+        print("\n=== クリーンアップ開始 ===")
         if browser:
             try:
-                print("ブラウザを終了中...")
+                print(f"ブラウザを終了中... browser={browser}")
                 await browser.stop()
                 print("ブラウザ終了完了")
             except Exception as e:
-                print(f"ブラウザ終了時エラー: {e}")
-                pass
+                print(f"ブラウザ終了時エラー: {type(e).__name__}: {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            print("ブラウザオブジェクトが存在しません")
+        print("=== クリーンアップ完了 ===")
 
 def run_extraction(search_term=""):
     """非同期関数を同期的に実行"""
