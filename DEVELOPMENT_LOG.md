@@ -210,7 +210,7 @@ async def test_javascript_execution():
 ---
 
 ## Phase 6: エルメスサイト特化テスト 🛍️
-**ステータス**: 準備中
+**ステータス**: 🔄 デバッグ中 (2025-01-31)
 **目標**: 実際のターゲットサイトでのテスト
 
 ### 合格基準
@@ -296,11 +296,20 @@ async def test_hermes_site_scraping():
 3. ✅ Phase 2合格確認完了 (2025-01-30 21:18)
 4. ✅ ユーザー承認取得済み
 
+### 2025-01-31 更新
+- **Phase 6 デバッグ中**
+  - データフローエラー修正実装
+  - hermes-state直接RAW抽出実装
+  - PythonのJSONパーサー使用に変更
+  - メタデータとの混同を回避
+  - 商品データ構造の詳細ロギング追加
+  - Hugging Face Spaceにデプロイ済み
+
 ### 次のアクション
-1. Phase 3: nodriver基本動作テスト用アプリを作成
-2. nodriver.start()の詳細検証とNoneTypeエラー原因特定
-3. ユーザーからのPhase 3合格承認を待つ
-4. 承認後にPhase 4へ進行
+1. Phase 6: エルメスサイト特化テストの結果確認
+2. hermes-state JSONから実際の商品データ抽出確認
+3. ユーザーからのPhase 6合格承認を待つ
+4. 承認後にPhase 7へ進行
 
 ---
 
