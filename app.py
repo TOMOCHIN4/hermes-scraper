@@ -4,9 +4,10 @@ import asyncio
 import gradio as gr
 from datetime import datetime
 import traceback
+import socket
 
-def test_nodriver_basic():
-    """Phase 3: nodriver基本動作テスト"""
+def test_network_connection():
+    """Phase 4: ネットワーク接続テスト"""
     results = []
     
     # コンテナログにも同時出力する関数
@@ -16,294 +17,258 @@ def test_nodriver_basic():
         sys.stdout.flush()
     
     # 初期ログ出力
-    print("=== Phase 3: nodriver基本動作テスト ===")
+    print("=== Phase 4: ネットワーク接続テスト ===")
     print(f"実行時刻: {datetime.now()}")
     print("")
     sys.stdout.flush()
     
-    log_and_append("=== Phase 3: nodriver基本動作テスト ===")
+    log_and_append("=== Phase 4: ネットワーク接続テスト ===")
     log_and_append(f"実行時刻: {datetime.now()}")
     log_and_append("")
     
-    # Phase 1,2結果の再確認
+    # Phase 1,2,3結果の再確認
     log_and_append("📋 前Phase結果の再確認:")
     log_and_append("  ✅ Phase 1: Python環境、依存関係、Chromiumバイナリ")
     log_and_append("  ✅ Phase 2: Chromium起動、プロセス管理、デバッグポート")
+    log_and_append("  ✅ Phase 3: nodriver基本動作、ローカルHTML取得")
     log_and_append("")
     
-    # nodriverインポートテスト
-    log_and_append("📦 nodriverインポートテスト:")
-    try:
-        import nodriver as nd
-        log_and_append("  ✅ nodriver インポート成功")
-        log_and_append(f"  モジュールパス: {nd.__file__ if hasattr(nd, '__file__') else 'unknown'}")
-        log_and_append(f"  バージョン: {nd.__version__ if hasattr(nd, '__version__') else 'unknown'}")
-        
-        # nodriverの主要属性確認
-        log_and_append("  主要属性:")
-        important_attrs = ['start', 'Browser', 'Tab', 'Element']
-        for attr in important_attrs:
-            if hasattr(nd, attr):
-                log_and_append(f"    ✅ {attr}: {type(getattr(nd, attr))}")
-            else:
-                log_and_append(f"    ❌ {attr}: 存在しません")
-    except Exception as e:
-        log_and_append(f"  ❌ nodriverインポート失敗: {e}")
-        log_and_append("Phase 3 ステータス: FAILED - Phase 1を再実行してください")
-        return "\n".join(results)
+    # テスト1: システムレベルのネットワーク確認
+    log_and_append("🌐 テスト1: システムレベルネットワーク確認")
     
-    log_and_append("")
+    # DNS解決テスト
+    log_and_append("  Step 1: DNS解決テスト")
+    test_domains = ["google.com", "github.com", "httpbin.org"]
     
-    # テスト1: 非同期環境確認
-    log_and_append("🔄 テスト1: 非同期環境確認")
-    try:
-        import nest_asyncio
-        nest_asyncio.apply()
-        log_and_append("  ✅ nest_asyncio 適用成功")
-        
-        # 現在のイベントループ状況確認
+    for domain in test_domains:
         try:
-            loop = asyncio.get_event_loop()
-            log_and_append(f"  現在のループ: {type(loop)} (running: {loop.is_running()})")
+            log_and_append(f"    DNS解決テスト: {domain}")
+            ip = socket.gethostbyname(domain)
+            log_and_append(f"    ✅ {domain} → {ip}")
         except Exception as e:
-            log_and_append(f"  ループ確認エラー: {e}")
-            
-    except Exception as e:
-        log_and_append(f"  ❌ 非同期環境準備エラー: {e}")
+            log_and_append(f"    ❌ {domain} DNS解決エラー: {e}")
     
     log_and_append("")
     
-    # テスト2: nodriver.start()の詳細テスト
-    log_and_append("🚀 テスト2: nodriver.start()詳細テスト")
+    # テスト2: TCP接続テスト
+    log_and_append("  Step 2: TCP接続テスト")
+    test_endpoints = [
+        ("google.com", 80),
+        ("google.com", 443),
+        ("httpbin.org", 443)
+    ]
     
-    async def test_nodriver_start():
+    for host, port in test_endpoints:
+        try:
+            log_and_append(f"    TCP接続テスト: {host}:{port}")
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(10)
+            result = sock.connect_ex((host, port))
+            sock.close()
+            
+            if result == 0:
+                log_and_append(f"    ✅ {host}:{port} 接続成功")
+            else:
+                log_and_append(f"    ❌ {host}:{port} 接続失敗 (code: {result})")
+        except Exception as e:
+            log_and_append(f"    ❌ {host}:{port} 接続エラー: {e}")
+    
+    log_and_append("")
+    
+    # テスト3: nodriverでの外部サイトアクセス
+    log_and_append("🚀 テスト3: nodriverによる外部サイトアクセス")
+    
+    async def test_nodriver_network():
         browser = None
         try:
-            log_and_append("  Step 1: nodriver.start()パラメータ準備")
+            # nodriverインポート
+            import nodriver as nd
+            import nest_asyncio
+            nest_asyncio.apply()
             
-            # Phase 2で成功したChromium設定を使用
+            log_and_append("  Step 1: nodriver.start()実行")
             browser_args = [
                 '--headless',
                 '--no-sandbox', 
                 '--disable-gpu',
-                '--disable-dev-shm-usage'
+                '--disable-dev-shm-usage',
+                '--disable-web-security',
+                '--disable-features=VizDisplayCompositor'
             ]
             
-            log_and_append(f"    使用引数: {browser_args}")
-            log_and_append(f"    sandbox: False")
-            log_and_append(f"    headless: True")
-            log_and_append("")
-            
-            log_and_append("  Step 2: nodriver.start()実行開始")
-            log_and_append("    ⏳ ブラウザ起動中...")
-            
-            # nodriver.start()実行
             browser = await nd.start(
                 headless=True,
                 sandbox=False,
                 browser_args=browser_args
             )
             
-            log_and_append(f"  Step 3: nodriver.start()戻り値確認")
-            log_and_append(f"    戻り値型: {type(browser)}")
-            log_and_append(f"    戻り値: {browser}")
-            
-            if browser is None:
-                log_and_append("    ❌ ERROR: browser is None")
-                return False
-            
-            log_and_append("    ✅ browser オブジェクト取得成功")
-            
-            # browserオブジェクトの詳細確認
-            log_and_append("  Step 4: browserオブジェクト詳細確認")
-            log_and_append(f"    クラス: {browser.__class__}")
-            log_and_append(f"    モジュール: {browser.__class__.__module__}")
-            
-            # 主要メソッドの存在確認
-            important_methods = ['get', 'close', 'stop', 'quit']
-            for method in important_methods:
-                if hasattr(browser, method):
-                    log_and_append(f"    ✅ メソッド {method}: {type(getattr(browser, method))}")
-                else:
-                    log_and_append(f"    ❌ メソッド {method}: 存在しません")
-            
+            log_and_append(f"    ✅ Browser開始成功: {type(browser)}")
             log_and_append("")
             
-            # テスト3: 最小限のページアクセステスト
-            log_and_append("  Step 5: 最小限のページアクセステスト")
+            # テストサイト一覧（軽量で安定したサイト）
+            test_sites = [
+                {
+                    "name": "httpbin.org (HTTP testing service)",
+                    "url": "https://httpbin.org/html",
+                    "expected_title_contains": "Herman"
+                },
+                {
+                    "name": "Example.org (IANA)",
+                    "url": "https://example.org",
+                    "expected_title_contains": "Example"
+                },
+                {
+                    "name": "Google Homepage",
+                    "url": "https://www.google.com",
+                    "expected_title_contains": "Google"
+                }
+            ]
             
-            # data: URLを使用してローカルHTMLをテスト
-            test_html = "data:text/html,<html><head><title>Test Page</title></head><body><h1>Hello World</h1></body></html>"
-            log_and_append(f"    テストURL: {test_html[:50]}...")
+            success_count = 0
             
-            log_and_append("    ⏳ browser.get()実行中...")
-            tab = await browser.get(test_html)
-            
-            log_and_append(f"    browser.get()戻り値型: {type(tab)}")
-            log_and_append(f"    browser.get()戻り値: {tab}")
-            
-            if tab is None:
-                log_and_append("    ❌ ERROR: tab is None")
-                return False
-            
-            log_and_append("    ✅ tab オブジェクト取得成功")
-            
-            # tabオブジェクトの詳細確認
-            log_and_append("  Step 6: tabオブジェクト詳細確認")
-            log_and_append(f"    クラス: {tab.__class__}")
-            
-            # タイトル取得テスト
-            log_and_append("    ⏳ ページタイトル取得中...")
-            try:
-                # タイトル取得方法を複数試行
-                title_methods = [
-                    ('tab.title', lambda: tab.title),
-                    ('tab.get_title()', lambda: tab.get_title() if hasattr(tab, 'get_title') else None),
-                    ('await tab.evaluate("document.title")', lambda: tab.evaluate('document.title'))
-                ]
+            for i, site in enumerate(test_sites, 1):
+                log_and_append(f"  Step {i+1}: {site['name']} アクセステスト")
+                log_and_append(f"    URL: {site['url']}")
                 
-                for method_name, method_func in title_methods:
+                try:
+                    log_and_append(f"    ⏳ ページ読み込み中...")
+                    
+                    # タイムアウト付きでページアクセス
+                    tab = await asyncio.wait_for(
+                        browser.get(site['url']), 
+                        timeout=30
+                    )
+                    
+                    if tab is None:
+                        log_and_append(f"    ❌ tab取得失敗 (None)")
+                        continue
+                    
+                    log_and_append(f"    ✅ tab取得成功: {type(tab)}")
+                    
+                    # ページロード完了を待機
+                    log_and_append(f"    ⏳ ページロード完了待機...")
+                    await asyncio.sleep(3)
+                    
+                    # ページタイトル取得
                     try:
-                        log_and_append(f"      試行: {method_name}")
-                        if 'await' in method_name:
-                            title = await method_func()
-                        else:
-                            title = method_func()
+                        # 複数の方法でタイトル取得を試行
+                        title = None
                         
-                        if title:
-                            log_and_append(f"      ✅ 成功: '{title}'")
-                            break
+                        # Method 1: tab.title
+                        try:
+                            title = tab.title
+                            if title:
+                                log_and_append(f"    ✅ タイトル取得 (tab.title): '{title}'")
+                        except:
+                            pass
+                        
+                        # Method 2: evaluate document.title
+                        if not title:
+                            try:
+                                title = await tab.evaluate('document.title')
+                                if title:
+                                    log_and_append(f"    ✅ タイトル取得 (evaluate): '{title}'")
+                            except Exception as eval_error:
+                                log_and_append(f"    ⚠️ evaluate失敗: {eval_error}")
+                        
+                        # タイトル検証
+                        if title and site['expected_title_contains'].lower() in title.lower():
+                            log_and_append(f"    ✅ 期待されるタイトル内容を確認")
+                            success_count += 1
+                        elif title:
+                            log_and_append(f"    ⚠️ タイトルは取得できたが期待内容と異なる")
+                            log_and_append(f"        期待: '{site['expected_title_contains']}' を含む")
+                            log_and_append(f"        実際: '{title}'")
                         else:
-                            log_and_append(f"      ⚠️ 空の結果")
-                    except Exception as e:
-                        log_and_append(f"      ❌ 失敗: {e}")
+                            log_and_append(f"    ❌ タイトル取得失敗")
+                        
+                        # 簡単なDOM要素確認
+                        try:
+                            body_text = await tab.evaluate('document.body ? document.body.innerText.substring(0, 100) : "No body"')
+                            if body_text and body_text.strip():
+                                log_and_append(f"    ✅ ページ内容確認: '{body_text[:50]}...'")
+                            else:
+                                log_and_append(f"    ⚠️ ページ内容が空またはDOM読み込み未完了")
+                        except Exception as content_error:
+                            log_and_append(f"    ⚠️ ページ内容取得エラー: {content_error}")
+                        
+                    except Exception as title_error:
+                        log_and_append(f"    ❌ ページ情報取得エラー: {title_error}")
                 
-            except Exception as e:
-                log_and_append(f"    ❌ タイトル取得エラー: {e}")
+                except asyncio.TimeoutError:
+                    log_and_append(f"    ❌ タイムアウト (30秒)")
+                except Exception as page_error:
+                    log_and_append(f"    ❌ ページアクセスエラー: {type(page_error).__name__}: {page_error}")
+                
+                log_and_append("")
             
-            log_and_append("")
-            log_and_append("  ✅ nodriver基本動作テスト成功")
-            return True
+            # 結果評価
+            log_and_append(f"📊 ネットワークテスト結果: {success_count}/{len(test_sites)} サイト成功")
+            
+            return success_count > 0
             
         except Exception as e:
-            log_and_append(f"  ❌ nodriver.start()エラー: {type(e).__name__}: {e}")
-            log_and_append("  詳細スタックトレース:")
+            log_and_append(f"❌ nodriver ネットワークテスト全体エラー: {type(e).__name__}: {e}")
+            log_and_append("詳細スタックトレース:")
             for line in traceback.format_exc().split('\n'):
                 if line.strip():
-                    log_and_append(f"    {line}")
+                    log_and_append(f"  {line}")
             return False
             
         finally:
-            # 改善されたクリーンアップ処理
+            # 簡略化されたクリーンアップ
             if browser:
                 try:
-                    log_and_append("  🧹 ブラウザクリーンアップ開始")
-                    
-                    # Step 1: 全てのタブを安全に閉じる
-                    try:
-                        if hasattr(browser, 'tabs') and browser.tabs:
-                            log_and_append(f"    開いているタブ数: {len(browser.tabs)}")
-                            for i, tab in enumerate(browser.tabs):
-                                try:
-                                    await tab.close()
-                                    log_and_append(f"    タブ {i+1} 閉じました")
-                                except Exception as tab_error:
-                                    log_and_append(f"    タブ {i+1} 閉じる際エラー: {tab_error}")
-                        else:
-                            log_and_append("    タブなし、またはタブ情報取得不可")
-                    except Exception as tabs_error:
-                        log_and_append(f"    タブ処理エラー: {tabs_error}")
-                    
-                    # Step 2: 接続を安全に閉じる
-                    try:
-                        if hasattr(browser, 'connection') and browser.connection:
-                            log_and_append("    WebSocket接続を閉じています...")
-                            await browser.connection.aclose()
-                            log_and_append("    ✅ WebSocket接続閉じました")
-                        else:
-                            log_and_append("    WebSocket接続なし、またはすでに閉じられています")
-                    except Exception as conn_error:
-                        log_and_append(f"    WebSocket接続エラー: {conn_error}")
-                    
-                    # Step 3: ブラウザプロセスを確認・終了
-                    try:
-                        if hasattr(browser, '_process') and browser._process:
-                            log_and_append("    ブラウザプロセス終了中...")
-                            if browser._process.poll() is None:  # プロセスがまだ実行中
-                                browser._process.terminate()
-                                try:
-                                    await asyncio.wait_for(browser._process.wait(), timeout=5)
-                                    log_and_append("    ✅ ブラウザプロセス正常終了")
-                                except asyncio.TimeoutError:
-                                    browser._process.kill()
-                                    await browser._process.wait()
-                                    log_and_append("    ⚠️ ブラウザプロセス強制終了")
-                            else:
-                                log_and_append("    ブラウザプロセスは既に終了済み")
-                        else:
-                            log_and_append("    ブラウザプロセス情報なし")
-                    except Exception as process_error:
-                        log_and_append(f"    プロセス終了エラー: {process_error}")
-                    
-                    # Step 4: 最後にbrowser.stop()を呼び出す（エラーを無視）
-                    try:
-                        await browser.stop()
-                        log_and_append("    ✅ browser.stop()完了")
-                    except Exception as stop_error:
-                        log_and_append(f"    browser.stop()エラー（無視）: {stop_error}")
-                    
-                    log_and_append("  ✅ ブラウザクリーンアップ完了")
-                    
-                except Exception as cleanup_error:
-                    log_and_append(f"  ❌ クリーンアップ全体エラー: {cleanup_error}")
-            else:
-                log_and_append("  ブラウザオブジェクトなし - クリーンアップ不要")
+                    log_and_append("🧹 ブラウザクリーンアップ")
+                    await browser.stop()
+                except:
+                    pass  # エラーは無視
+                log_and_append("✅ クリーンアップ完了")
     
     # 非同期テストを実行
     try:
-        # 新しいイベントループで実行
-        success = asyncio.run(test_nodriver_start())
+        network_success = asyncio.run(test_nodriver_network())
     except Exception as e:
-        log_and_append(f"  ❌ 非同期実行エラー: {e}")
-        log_and_append("  詳細スタックトレース:")
+        log_and_append(f"❌ 非同期実行エラー: {e}")
+        log_and_append("詳細スタックトレース:")
         for line in traceback.format_exc().split('\n'):
             if line.strip():
-                log_and_append(f"    {line}")
-        success = False
+                log_and_append(f"  {line}")
+        network_success = False
     
     log_and_append("")
     
     # 総合評価
-    log_and_append("📊 Phase 3 総合評価:")
+    log_and_append("📊 Phase 4 総合評価:")
     
-    if success:
-        log_and_append("  ✅ 成功: nodriver基本動作確認完了")
-        phase3_status = "PASSED"
+    if network_success:
+        log_and_append("  ✅ 成功: ネットワーク接続確認完了")
+        phase4_status = "PASSED"
     else:
-        log_and_append("  ❌ 失敗: nodriver動作に問題あり")
-        phase3_status = "FAILED"
+        log_and_append("  ❌ 失敗: ネットワーク接続に問題あり")
+        phase4_status = "FAILED"
     
     log_and_append("")
-    log_and_append(f"Phase 3 ステータス: {phase3_status}")
+    log_and_append(f"Phase 4 ステータス: {phase4_status}")
     
-    if phase3_status == "PASSED":
+    if phase4_status == "PASSED":
         log_and_append("")
-        log_and_append("🎉 Phase 3合格！Phase 4に進む準備ができました。")
+        log_and_append("🎉 Phase 4合格！Phase 5に進む準備ができました。")
         log_and_append("ユーザーからの承認をお待ちしています。")
     else:
         log_and_append("")
-        log_and_append("❌ Phase 3で問題が発見されました。")
-        log_and_append("上記のエラー詳細を確認して修正が必要です。")
+        log_and_append("❌ Phase 4で問題が発見されました。")
+        log_and_append("ネットワーク設定またはファイアウォールの確認が必要です。")
     
     return "\n".join(results)
 
 # Gradioインターフェース
-with gr.Blocks(title="Phase 3: nodriver基本動作テスト") as app:
-    gr.Markdown("# 🚀 Phase 3: nodriver基本動作テスト")
-    gr.Markdown("エルメス商品情報抽出ツールの段階的開発 - Phase 3")
+with gr.Blocks(title="Phase 4: ネットワーク接続テスト") as app:
+    gr.Markdown("# 🌐 Phase 4: ネットワーク接続テスト")
+    gr.Markdown("エルメス商品情報抽出ツールの段階的開発 - Phase 4")
     
     with gr.Row():
-        test_btn = gr.Button("🧪 nodriver基本動作テストを実行", variant="primary")
+        test_btn = gr.Button("🌐 ネットワーク接続テストを実行", variant="primary")
     
     with gr.Row():
         output = gr.Textbox(
@@ -314,28 +279,31 @@ with gr.Blocks(title="Phase 3: nodriver基本動作テスト") as app:
         )
     
     test_btn.click(
-        fn=test_nodriver_basic,
+        fn=test_network_connection,
         outputs=output
     )
     
     gr.Markdown("""
-    ## Phase 3 の目標
-    - nodriver.start()の成功とオブジェクト取得
-    - ローカルHTMLページでの基本動作確認
-    - タイトル取得などの基本的なページ操作
-    - NoneType エラーの根本原因特定
+    ## Phase 4 の目標
+    - DNS解決機能の確認
+    - 外部サイトへのTCP/SSL接続確認
+    - nodriverによる実際のWebページアクセス
+    - ページタイトルとコンテンツの取得
     
     ## 合格基準
-    - nodriver.start()でブラウザオブジェクト取得成功
-    - browser.get()でタブオブジェクト取得成功
-    - 基本的なページ操作（タイトル取得等）成功
+    - 基本的なDNS解決が成功すること
+    - HTTPS接続が確立できること
+    - 最低1つの外部サイトからデータ取得成功
     
     ## 前提条件
     - Phase 1: 基本環境テスト合格済み
     - Phase 2: Chromium起動テスト合格済み
+    - Phase 3: nodriver基本動作テスト合格済み
     
-    ## 注意事項
-    - このテストでNoneTypeエラーの根本原因が特定される予定です
+    ## テスト対象サイト
+    - httpbin.org (HTTP testing service)
+    - example.org (IANA test domain)
+    - google.com (実用サイト)
     """)
 
 if __name__ == "__main__":
