@@ -607,8 +607,8 @@ def test_hermes_site_scraping():
                                         extraction_success = True
                                         break
                         
-                        except Exception as json_error:
-                            log_and_append(f"      ❌ JSON抽出エラー: {json_error}")
+                        except Exception as html_error:
+                            log_and_append(f"      ❌ HTML抽出エラー: {html_error}")
                         
                         if extraction_success:
                             break
@@ -660,7 +660,7 @@ def test_hermes_site_scraping():
                     security_info = await tab.evaluate(security_script)
                     
                     # nodriverのデータ形式対応
-                    normalized_security = extract_raw_content_from_nodriver(security_info) if isinstance(security_info, list) else security_info
+                    normalized_security = security_info
                     
                     log_and_append("    セキュリティ状況:")
                     if isinstance(normalized_security, dict):
