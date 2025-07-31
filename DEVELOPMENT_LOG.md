@@ -220,14 +220,21 @@ async def test_javascript_execution():
 - [ ] ページネーション対応（Phase 7で実装予定）
 - [x] 検索機能の確認 ✅
 
-### 実装予定
+### 実装内容（最新版）
 ```python
 async def test_hermes_site_scraping():
-    print("=== Phase 6: エルメスサイト特化テスト ===")
-    # エルメス公式サイトへの接続テスト
-    # 商品カテゴリページの構造解析
-    # 商品情報抽出（名前、価格、URL）
-    # 検索機能とフィルタリング
+    print("=== Phase 6: HTML完全ダウンロード & データ抽出 ===")
+    
+    # 1. 完全なHTMLをダウンロード
+    full_html = await tab.evaluate('() => document.documentElement.outerHTML')
+    with open('hermes_page.html', 'w', encoding='utf-8') as f:
+        f.write(full_html)
+    
+    # 2. 商品データを抽出（HTML直接解析）
+    # 3. 3形式でデータ保存
+    #    - hermes_products.json (プログラム用)
+    #    - hermes_products.csv (Excel用)
+    #    - hermes_products.txt (人間が読む用)
 ```
 
 ### テスト項目
@@ -325,6 +332,20 @@ async def test_hermes_site_scraping():
     - 商品データのみのダウンロード機能
   - **結果**: コード量50%削減、処理高速化、保守性向上
   - **コミット**: fe02d52（元に戻す場合は `git checkout 39721d2` で戻れます）
+
+- **Phase 6 最新実装（HTMLダウンロード版）**
+  - **ユーザー要望**: 完全なHTMLダウンロードと3形式でのデータ出力
+  - **実装内容**:
+    - ページの完全なHTMLを`hermes_page.html`に保存
+    - 商品データを3形式で出力（JSON/CSV/TXT）
+    - テキストファイルに商品名、URL、総数を見やすく出力
+    - ファイル名を固定化（タイムスタンプ削除）
+  - **技術的改善**:
+    - nodriverのリスト形式データ処理を完全対応
+    - safe_get関数を改善（`[['key', {'value': xxx}]]`形式対応）
+    - 出力ファイルの一覧表示機能を追加
+  - **コミット**: 2e135f2
+  - **Hugging Face Spaceにデプロイ済み（4回目）**
 
 ### 次のアクション
 1. Phase 6: エルメスサイト特化テストの結果確認
