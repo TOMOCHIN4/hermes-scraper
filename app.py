@@ -424,11 +424,11 @@ def test_hermes_site_scraping():
                     try:
                         tab = page['tab']
                         
-                        # エルメス特有のJSON データ抽出方式
-                        log_and_append(f"      エルメス特化: JSON データ抽出を試行")
+                        # エルメス特有の商品データ抽出
+                        log_and_append(f"      エルメス特化: 商品データ抽出を試行")
                         
-                        # 【重要修正】hermes-state の直接RAW取得
-                        log_and_append(f"      🎯 hermes-state RAW内容取得:")
+                        # hermes-state 分析（参考情報）
+                        log_and_append(f"      📊 hermes-state 分析（参考情報）:")
                         
                         raw_hermes_data = await tab.evaluate('''
                         (function() {
@@ -685,142 +685,125 @@ def test_hermes_site_scraping():
                                 error_msg = f"予期しないデータ形式: {type(raw_hermes_data)}"
                             log_and_append(f"        ❌ hermes-state取得エラー: {error_msg}")
                         
-                        # Step 2: 構造に応じた商品データ抽出（改善版）
-                        json_extraction_script = '''
+                        # Step 2: HTML直接解析による商品データ抽出
+                        html_extraction_script = '''
                         (function() {
                             try {
-                                const hermesStateScript = document.getElementById('hermes-state');
-                                if (hermesStateScript) {
-                                    const jsonData = JSON.parse(hermesStateScript.textContent);
-                                    let productData = null;
+                                // 総商品数を取得
+                                const totalElement = document.querySelector('[data-testid="number-current-result"]');
+                                const totalMatch = totalElement ? totalElement.textContent.match(/\\((\\d+)\\)/) : null;
+                                const total = totalMatch ? parseInt(totalMatch[1]) : 0;
+                                
+                                // 商品要素を取得
+                                const productElements = document.querySelectorAll('h-grid-result-item, .product-grid-list-item');
+                                const products = [];
+                                
+                                productElements.forEach((element, index) => {
+                                    if (index >= 20) return; // 最大20件
                                     
-                                    // エルメス特有の構造を探索（正確な構造: 数値キー.s.products）
-                                    const searchInObject = (obj, path = '') => {
-                                        if (!obj || typeof obj !== 'object') return null;
-                                        
-                                        // 's' (search) キーを優先的に探す - エルメスの正確な構造
-                                        if (obj.s && typeof obj.s === 'object') {
-                                            const sData = obj.s;
-                                            // products.items - これが正解！
-                                            if (sData.products && typeof sData.products === 'object' && sData.products.items && Array.isArray(sData.products.items)) {
-                                                return {
-                                                    path: path + '.s.products',
-                                                    total: sData.products.total || sData.products.items.length,
-                                                    items: sData.products.items
-                                                };
-                                            }
-                                            // 直接items
-                                            if (sData.items && Array.isArray(sData.items)) {
-                                                return {
-                                                    path: path + '.s.items',
-                                                    total: sData.items.length,
-                                                    items: sData.items
-                                                };
-                                            }
-                                            // results
-                                            if (sData.results && Array.isArray(sData.results)) {
-                                                return {
-                                                    path: path + '.s.results',
-                                                    total: sData.results.length,
-                                                    items: sData.results
-                                                };
-                                            }
+                                    // 商品リンク要素を探す
+                                    const linkElement = element.querySelector('a.product-item-name');
+                                    if (!linkElement) return;
+                                    
+                                    // 商品名
+                                    const titleElement = linkElement.querySelector('.product-title');
+                                    const title = titleElement ? titleElement.textContent.trim() : 'N/A';
+                                    
+                                    // URL
+                                    const url = linkElement.href || linkElement.getAttribute('href') || 'N/A';
+                                    
+                                    // SKU（商品ID）
+                                    const sku = linkElement.id ? linkElement.id.replace('product-item-meta-link-', '') : 'N/A';
+                                    
+                                    // 価格を探す
+                                    const priceElement = element.querySelector('.price, [class*="price"]');
+                                    const price = priceElement ? priceElement.textContent.trim() : 'N/A';
+                                    
+                                    // カラー情報（オプション）
+                                    const colorElement = element.querySelector('.product-item-color');
+                                    const color = colorElement ? colorElement.textContent.trim() : '';
+                                    
+                                    products.push({
+                                        title: title,
+                                        url: url,
+                                        sku: sku,
+                                        price: price,
+                                        color: color,
+                                        index: index + 1
+                                    });
+                                });
+                                
+                                if (products.length > 0) {
+                                    return {
+                                        success: true,
+                                        data: {
+                                            total: total,
+                                            extracted: products.length,
+                                            items: products
                                         }
-                                        
-                                        // products直下を探す（フォールバック）
-                                        if (obj.products && obj.products.items && Array.isArray(obj.products.items)) {
-                                            return {
-                                                path: path + '.products',
-                                                total: obj.products.total || obj.products.items.length,
-                                                items: obj.products.items
-                                            };
-                                        }
-                                        
-                                        return null;
+                                    };
+                                } else {
+                                    // デバッグ用: 要素の検索状況
+                                    const debugInfo = {
+                                        totalElement: !!totalElement,
+                                        productElements: productElements.length,
+                                        firstElementHTML: productElements[0] ? productElements[0].outerHTML.substring(0, 200) : 'N/A'
                                     };
                                     
-                                    // トップレベルから探索
-                                    for (let key of Object.keys(jsonData).slice(0, 10)) {
-                                        const result = searchInObject(jsonData[key], key);
-                                        if (result) {
-                                            productData = {
-                                                total: result.total,
-                                                path: result.path,
-                                                items: result.items.slice(0, 10).map(p => ({
-                                                    title: p.title || p.name || p.displayName || 'N/A',
-                                                    url: p.url || p.link || p.href || 'N/A',
-                                                    sku: p.sku || p.id || p.code || 'N/A',
-                                                    price: p.price || p.priceRange || 'N/A'
-                                                }))
-                                            };
-                                            console.log('✅ 商品データ発見:', result.path, '総数:', result.total);
-                                            break;
-                                        }
-                                    }
-                                    
-                                    if (productData && productData.items.length > 0) {
-                                        return { success: true, data: productData };
-                                    } else {
-                                        // デバッグ情報を収集
-                                        const debugInfo = {};
-                                        for (let key of Object.keys(jsonData).slice(0, 5)) {
-                                            const value = jsonData[key];
-                                            if (typeof value === 'object' && value !== null) {
-                                                debugInfo[key] = Object.keys(value);
-                                            }
-                                        }
-                                        
-                                        return { 
-                                            success: false, 
-                                            error: 'Product data structure not found',
-                                            available_keys: Object.keys(jsonData),
-                                            debug_structure: debugInfo
-                                        };
-                                    }
-                                } else {
-                                    return { success: false, error: 'hermes-state script not found' };
+                                    return {
+                                        success: false,
+                                        error: 'No products found in HTML',
+                                        debug: debugInfo
+                                    };
                                 }
                             } catch (error) {
-                                return { success: false, error: error.message, stack: error.stack };
+                                return { success: false, error: error.message };
                             }
                         })()
                         '''
                         
+                        log_and_append(f"      🔄 HTML直接解析による商品データ抽出を試行")
+                        
                         try:
-                            json_result = await tab.evaluate(json_extraction_script)
+                            html_result = await tab.evaluate(html_extraction_script)
                             
                             # nodriverのリスト形式データへの対応
-                            normalized_json_result = extract_raw_content_from_nodriver(json_result) if 'extract_raw_content_from_nodriver' in locals() else json_result
+                            normalized_html_result = extract_raw_content_from_nodriver(html_result) if isinstance(html_result, list) else html_result
                             
-                            if isinstance(normalized_json_result, dict) and normalized_json_result.get('success'):
-                                product_data = normalized_json_result['data']
-                                total_count = product_data['total']
+                            if isinstance(normalized_html_result, dict) and normalized_html_result.get('success'):
+                                product_data = normalized_html_result['data']
+                                total_count = product_data.get('total', 0)
+                                extracted_count = product_data.get('extracted', 0)
                                 items = product_data['items']
                                 
-                                log_and_append(f"      ✅ JSON商品データ抽出成功!")
-                                log_and_append(f"      データパス: {product_data.get('path', 'N/A')}")
+                                log_and_append(f"      ✅ HTML商品データ抽出成功!")
                                 log_and_append(f"      総商品数: {total_count}")
-                                log_and_append(f"      サンプル商品: {len(items)}件")
+                                log_and_append(f"      抽出商品数: {extracted_count}")
+                                log_and_append(f"      表示商品: {len(items)}件")
                                 
-                                for i, item in enumerate(items, 1):
-                                    log_and_append(f"        {i}. {item['title']}")
-                                    log_and_append(f"           URL: https://www.hermes.com/jp/ja{item['url']}")
+                                for item in items[:10]:  # 最初の10件を表示
+                                    log_and_append(f"        {item['index']}. {item['title']}")
+                                    if item['color']:
+                                        log_and_append(f"           カラー: {item['color']}")
+                                    log_and_append(f"           URL: {item['url']}")
                                     log_and_append(f"           SKU: {item['sku']}")
-                                    if item.get('price'):
+                                    if item['price'] != 'N/A':
                                         log_and_append(f"           価格: {item['price']}")
                                 
                                 extraction_success = True
                                 break
                                 
                             else:
-                                error_msg = normalized_json_result.get('error', 'Unknown error') if isinstance(normalized_json_result, dict) else str(normalized_json_result)
-                                log_and_append(f"      ⚠️ JSON抽出失敗: {error_msg}")
+                                error_msg = normalized_html_result.get('error', 'Unknown error') if isinstance(normalized_html_result, dict) else str(normalized_html_result)
+                                log_and_append(f"      ⚠️ HTML抽出失敗: {error_msg}")
                                 
-                                if isinstance(normalized_json_result, dict):
-                                    if 'available_keys' in normalized_json_result:
-                                        log_and_append(f"      利用可能なキー: {normalized_json_result['available_keys']}")
-                                    if 'debug_structure' in normalized_json_result:
-                                        log_and_append(f"      デバッグ構造: {normalized_json_result['debug_structure']}")
+                                if isinstance(normalized_html_result, dict) and 'debug' in normalized_html_result:
+                                    debug_info = normalized_html_result['debug']
+                                    log_and_append(f"      デバッグ情報:")
+                                    log_and_append(f"        総数要素: {debug_info.get('totalElement', False)}")
+                                    log_and_append(f"        商品要素数: {debug_info.get('productElements', 0)}")
+                                    if 'firstElementHTML' in debug_info:
+                                        log_and_append(f"        最初の要素: {debug_info['firstElementHTML'][:100]}...")
                                 
                                 # フォールバック: 標準セレクタも試行
                                 log_and_append(f"      フォールバック: 標準セレクタを試行")
