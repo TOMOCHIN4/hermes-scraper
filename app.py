@@ -411,13 +411,10 @@ def test_hermes_site_scraping():
                         # 完全なHTMLをダウンロード（Load Moreボタン対応版）
                         log_and_append(f"      📥 完全なHTMLダウンロード開始（全商品読み込み版）")
                         
-                        # Load Moreボタンで全商品を読み込む関数
-                        async def load_all_products_with_monitoring(tab, max_clicks=20):
-                            """MutationObserverと商品数カウントを使用して全商品を読み込む"""
-                            log_and_append("      🔄 Load Moreボタンで全商品読み込み開始")
-                            
-                            total_clicks = 0
-                            initial_count = 0
+                        # Load Moreボタンで全商品を読み込む関数（1回のみクリック版）
+                        async def load_all_products_with_monitoring(tab):
+                            """Load Moreボタンを1回クリックして全商品を読み込む"""
+                            log_and_append("      🔄 Load Moreボタンで全商品読み込み開始（1回クリック版）")
                             
                             try:
                                 # 初期商品数を取得
@@ -443,31 +440,29 @@ def test_hermes_site_scraping():
                                     log_and_append(f"        ✅ 既に全商品が表示されています")
                                     return True
                                 
-                                while total_clicks < max_clicks:
-                                    # Load Moreボタンの状態を確認
-                                    button_state_raw = await tab.evaluate('''
-                                        (function() {
-                                            const btn = document.querySelector('button[data-testid="Load more items"]');
-                                            return {
-                                                exists: !!btn,
-                                                visible: btn ? btn.offsetParent !== null : false,
-                                                disabled: btn ? (btn.disabled || btn.getAttribute('aria-disabled') === 'true') : true,
-                                                text: btn ? btn.textContent.trim() : ''
-                                            };
-                                        })()
-                                    ''')
-                                    button_state = normalize_nodriver_result(button_state_raw)
-                                    
-                                    # ボタンが存在しない、見えない、または無効な場合は終了
-                                    if not button_state.get('exists') or not button_state.get('visible') or button_state.get('disabled'):
-                                        log_and_append(f"        Load Moreボタンが利用不可: {button_state}")
-                                        break
-                                    
-                                    # クリック前の商品数を記録
-                                    pre_click_count_raw = await tab.evaluate('document.querySelectorAll("h-grid-result-item").length')
-                                    pre_click_count = normalize_nodriver_result(pre_click_count_raw)
-                                    if isinstance(pre_click_count, dict):
-                                        pre_click_count = pre_click_count.get('value', 0)
+                                # Load Moreボタンの状態を確認
+                                button_state_raw = await tab.evaluate('''
+                                    (function() {
+                                        const btn = document.querySelector('button[data-testid="Load more items"]');
+                                        return {
+                                            exists: !!btn,
+                                            visible: btn ? btn.offsetParent !== null : false,
+                                            disabled: btn ? (btn.disabled || btn.getAttribute('aria-disabled') === 'true') : true,
+                                            text: btn ? btn.textContent.trim() : ''
+                                        };
+                                    })()
+                                ''')
+                                button_state = normalize_nodriver_result(button_state_raw)
+                                
+                                # ボタンが存在しない、見えない、または無効な場合は終了
+                                if not button_state.get('exists') or not button_state.get('visible') or button_state.get('disabled'):
+                                    log_and_append(f"        Load Moreボタンが利用不可: {button_state}")
+                                    return False
+                                
+                                log_and_append(f"        ✅ Load Moreボタン発見: {button_state.get('text')}")
+                                
+                                # クリック前の商品数を記録
+                                pre_click_count = initial_count
                                     
                                     # MutationObserverを設定
                                     await tab.evaluate('''
@@ -513,10 +508,9 @@ def test_hermes_site_scraping():
                                     
                                     if not click_result:
                                         log_and_append(f"        ❌ ボタンクリック失敗")
-                                        break
+                                        return False
                                     
-                                    total_clicks += 1
-                                    log_and_append(f"        クリック #{total_clicks}: 新商品読み込み中...")
+                                    log_and_append(f"        📍 Load Moreボタンをクリック（1回のみ）")
                                     
                                     # 新商品の読み込みを待つ（最大10秒）
                                     new_items_loaded = False
@@ -542,21 +536,9 @@ def test_hermes_site_scraping():
                                             final_count = final_count.get('value', 0)
                                         if final_count > pre_click_count:
                                             log_and_append(f"        ✅ 実際には{final_count - pre_click_count}個追加されていました")
-                                        else:
-                                            break
                                     
-                                    # レート制限対策の待機
-                                    await asyncio.sleep(2.5)
-                                    
-                                    # 全商品読み込み完了チェック
-                                    current_total_raw = await tab.evaluate('document.querySelectorAll("h-grid-result-item").length')
-                                    current_total = normalize_nodriver_result(current_total_raw)
-                                    if isinstance(current_total, dict):
-                                        current_total = current_total.get('value', 0)
-                                    
-                                    if current_total >= total_products and total_products > 0:
-                                        log_and_append(f"        ✅ 全商品読み込み完了: {current_total}/{total_products}個")
-                                        break
+                                    # 読み込み完了待機（Ajaxが完了するまで少し長めに待つ）
+                                    await asyncio.sleep(3)
                                 
                                 # クリーンアップ
                                 await tab.evaluate('if (window.loadMoreObserver) window.loadMoreObserver.disconnect()')
@@ -567,7 +549,15 @@ def test_hermes_site_scraping():
                                 if isinstance(final_count, dict):
                                     final_count = final_count.get('value', 0)
                                 
-                                log_and_append(f"      📊 読み込み完了: 初期{initial_count}個 → 最終{final_count}個 ({total_clicks}回クリック)")
+                                log_and_append(f"      📊 読み込み完了: 初期{initial_count}個 → 最終{final_count}個 (1回クリック)")
+                                
+                                # 全商品が読み込まれたか確認
+                                if final_count >= total_products and total_products > 0:
+                                    log_and_append(f"      ✅ 全商品読み込み成功: {final_count}/{total_products}個")
+                                elif final_count > initial_count:
+                                    log_and_append(f"      ⚠️ 一部読み込み成功: {final_count}個（総数: {total_products}個）")
+                                else:
+                                    log_and_append(f"      ❌ 追加商品なし")
                                 return True
                                 
                             except Exception as e:
