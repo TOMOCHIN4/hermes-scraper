@@ -41,7 +41,7 @@ def test_hermes_site_scraping():
     print("")
     sys.stdout.flush()
     
-    log_and_append("=== Phase 6: エルメスサイト特化テスト (v2025.01.31) ===")
+    log_and_append("=== Phase 6: エルメスサイト特化テスト (v2025.01.31.2) ===")
     log_and_append(f"実行時刻: {datetime.now()}")
     log_and_append("")
     
@@ -95,6 +95,12 @@ def test_hermes_site_scraping():
                 {
                     "name": "エルメスバッグ検索ページ（HTML直接解析テスト）",
                     "url": "https://www.hermes.com/jp/ja/search/?s=%E3%83%90%E3%83%83%E3%82%B0#",
+                    "timeout": 45,
+                    "extract_products": True
+                },
+                {
+                    "name": "エルメスロデオ検索ページ（追加テスト）",
+                    "url": "https://www.hermes.com/jp/ja/search/?s=%E3%83%AD%E3%83%87%E3%82%AA#|",
                     "timeout": 45,
                     "extract_products": True
                 }
@@ -517,7 +523,7 @@ def test_hermes_site_scraping():
                         
                         # HTMLをファイルに保存
                         import os
-                        html_filename = 'hermes_page.html'
+                        html_filename = f'hermes_page_{i}.html'
                         with open(html_filename, 'w', encoding='utf-8') as f:
                             f.write(full_html)
                         log_and_append(f"      ✅ HTMLを {html_filename} に保存 ({len(full_html):,} bytes)")
@@ -746,9 +752,9 @@ def test_hermes_site_scraping():
                             # 商品データを保存（JSON & CSV & TXT）
                             try:
                                 # 固定ファイル名（上書き保存）
-                                json_filename = "hermes_products.json"
-                                csv_filename = "hermes_products.csv"
-                                txt_filename = "hermes_products.txt"
+                                json_filename = f"hermes_products_{i}.json"
+                                csv_filename = f"hermes_products_{i}.csv"
+                                txt_filename = f"hermes_products_{i}.txt"
                                 
                                 # JSON形式で保存
                                 products_data = {
@@ -801,7 +807,7 @@ def test_hermes_site_scraping():
                                         f.write("-" * 40 + "\n\n")
                                 
                                 log_and_append(f"      💾 データ保存完了:")
-                                log_and_append(f"         - HTML: hermes_page.html ({len(full_html):,} bytes)")
+                                log_and_append(f"         - HTML: {html_filename} ({len(full_html):,} bytes)")
                                 log_and_append(f"         - JSON: {json_filename}")
                                 log_and_append(f"         - CSV: {csv_filename}")
                                 log_and_append(f"         - TXT: {txt_filename}")
@@ -901,9 +907,9 @@ def test_hermes_site_scraping():
                                             # 商品データを保存（JSON & CSV & TXT）
                                             try:
                                                 # 固定ファイル名（上書き保存）
-                                                json_filename = "hermes_products.json"
-                                                csv_filename = "hermes_products.csv"
-                                                txt_filename = "hermes_products.txt"
+                                                json_filename = f"hermes_products_{i}.json"
+                                                csv_filename = f"hermes_products_{i}.csv"
+                                                txt_filename = f"hermes_products_{i}.txt"
                                                 
                                                 # JSON形式で保存
                                                 products_data = {
@@ -1133,18 +1139,21 @@ def test_hermes_site_scraping():
     
     # 各種ファイルの存在確認
     files_to_check = [
-        ("hermes_page.html", "完全なHTMLファイル"),
-        ("hermes_products.json", "JSON形式の商品データ"),
-        ("hermes_products.csv", "CSV形式の商品データ"),
-        ("hermes_products.txt", "テキスト形式の商品データ")
+        ("hermes_page_*.html", "完全なHTMLファイル"),
+        ("hermes_products_*.json", "JSON形式の商品データ"),
+        ("hermes_products_*.csv", "CSV形式の商品データ"),
+        ("hermes_products_*.txt", "テキスト形式の商品データ")
     ]
     
-    for filename, description in files_to_check:
-        if os.path.exists(filename):
-            size = os.path.getsize(filename)
-            log_and_append(f"  ✅ {filename} ({size:,} bytes) - {description}")
+    import glob
+    for pattern, description in files_to_check:
+        matching_files = glob.glob(pattern)
+        if matching_files:
+            for filename in matching_files:
+                size = os.path.getsize(filename)
+                log_and_append(f"  ✅ {filename} ({size:,} bytes) - {description}")
         else:
-            log_and_append(f"  ❌ {filename} - 未生成")
+            log_and_append(f"  ❌ {pattern} - 未生成")
     
     return "\n".join(results)
 
@@ -1155,17 +1164,19 @@ def get_downloadable_files():
     import os
     files = []
     
-    # 固定ファイル名のファイルを確認
-    fixed_files = [
-        "hermes_page.html",
-        "hermes_products.json",
-        "hermes_products.csv",
-        "hermes_products.txt"
+    # 番号付きファイル名のファイルを確認
+    patterns = [
+        "hermes_page_*.html",
+        "hermes_products_*.json",
+        "hermes_products_*.csv",
+        "hermes_products_*.txt"
     ]
     
-    for filename in fixed_files:
-        if os.path.exists(filename) and os.path.getsize(filename) > 0:
-            files.append(filename)
+    for pattern in patterns:
+        matching_files = glob.glob(pattern)
+        for filename in matching_files:
+            if os.path.exists(filename) and os.path.getsize(filename) > 0:
+                files.append(filename)
     
     return files if files else None
 
