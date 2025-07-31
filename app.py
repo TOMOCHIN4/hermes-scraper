@@ -1159,34 +1159,11 @@ def test_hermes_site_scraping():
                     "source": "Phase 6.5 HTML Analysis"
                 }
                 
-                # JSON保存
+                # JSON保存のみ
                 with open('hermes_products.json', 'w', encoding='utf-8') as f:
                     json.dump(products_data, f, ensure_ascii=False, indent=2)
                 
-                # CSV保存
-                with open('hermes_products.csv', 'w', encoding='utf-8-sig', newline='') as f:
-                    if phase65_products:
-                        fieldnames = list(phase65_products[0].keys())
-                        writer = csv.DictWriter(f, fieldnames=fieldnames)
-                        writer.writeheader()
-                        writer.writerows(phase65_products)
-                
-                # TXT保存
-                with open('hermes_products.txt', 'w', encoding='utf-8') as f:
-                    f.write(f"エルメス商品情報 (Phase 6.5)\n")
-                    f.write(f"抽出日時: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-                    f.write(f"抽出成功: {len(phase65_products)}件\n")
-                    f.write("=" * 80 + "\n\n")
-                    
-                    for i, product in enumerate(phase65_products, 1):
-                        f.write(f"商品 {i}/{len(phase65_products)}\n")
-                        f.write(f"商品名: {product.get('name', 'N/A')}\n")
-                        f.write(f"価格: {product.get('price', 'N/A')}\n")
-                        f.write(f"URL: {product.get('url', 'N/A')}\n")
-                        f.write(f"SKU: {product.get('sku', 'N/A')}\n")
-                        f.write("-" * 40 + "\n\n")
-                
-                log_and_append("  💾 商品データを3形式で保存完了")
+                log_and_append("  💾 商品データをJSON形式で保存完了")
                 extraction_success = True
             else:
                 log_and_append("  ⚠️ Phase 6.5でも商品情報の抽出に失敗")
