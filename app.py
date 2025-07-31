@@ -527,7 +527,7 @@ def test_hermes_site_scraping():
                         log_and_append("      🔍 DOM要素から商品情報を抽出中...")
                         
                         try:
-                                html_extraction_script = '''
+                            html_extraction_script = '''
                         (function() {
                             try {
                                 // 総商品数を取得
