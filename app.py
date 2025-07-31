@@ -528,10 +528,13 @@ def test_hermes_site_scraping():
                         # Phase 6.0の成功判定: HTMLダウンロードが完了すれば成功
                         if len(full_html) > 100000:  # 100KB以上のHTMLなら成功
                             log_and_append("      ✅ Phase 6.0: HTMLダウンロード成功！")
+                            log_and_append("")
+                            log_and_append("  📊 Phase 6.0完了: HTMLダウンロードのみで終了")
+                            log_and_append("  ⚠️ 商品情報の抽出はPhase 6.5で行います")
                             hermes_success = True
-                        
-                        # DOM解析で商品情報を抽出（これはPhase 6.0のおまけ）
-                        log_and_append("      🔍 DOM要素から商品情報を抽出中...")
+                            
+                            # Phase 6.0はここで終了（DOM解析は行わない）
+                            break
                         
                         try:
                             html_extraction_script = '''
