@@ -41,7 +41,7 @@ def test_hermes_site_scraping():
     print("")
     sys.stdout.flush()
     
-    log_and_append("=== Phase 6: エルメスサイト特化テスト (v2025.01.31.2) ===")
+    log_and_append("=== Phase 6: エルメスサイト特化テスト (v2025.01.31.3) ===")
     log_and_append(f"実行時刻: {datetime.now()}")
     log_and_append("")
     
@@ -234,8 +234,9 @@ def test_hermes_site_scraping():
                                 
                                 // CAPTCHA/ブロック検出
                                 analysis.security_indicators = {
-                                    captcha: !!document.querySelector('[class*="captcha"], [id*="captcha"]'),
+                                    captcha: !!document.querySelector('[class*="captcha"], [id*="captcha"], iframe[title*="CAPTCHA"], iframe[src*="captcha"]'),
                                     cloudflare: !!document.querySelector('[data-cf-beacon], .cf-browser-verification'),
+                                    datadome: !!document.querySelector('script[src*="captcha-delivery.com"], iframe[src*="captcha-delivery.com"]'),
                                     blocked_text: body.innerText.toLowerCase().includes('blocked') || body.innerText.toLowerCase().includes('access denied'),
                                     bot_detected: body.innerText.toLowerCase().includes('bot') && body.innerText.toLowerCase().includes('detected')
                                 };
@@ -275,30 +276,29 @@ def test_hermes_site_scraping():
                             log_and_append(f"    📄 ページコンテンツ分析:")
                             log_and_append(f"      データ型: {type(page_analysis)}")
                             
-                            if isinstance(page_analysis, dict):
-                                log_and_append(f"      テキスト長: {safe_get(page_analysis, 'contentLength')}文字")
-                                log_and_append(f"      HTML長: {safe_get(page_analysis, 'htmlLength')}文字") 
-                                log_and_append(f"      子要素数: {safe_get(page_analysis, 'childElementCount')}個")
-                                log_and_append(f"      スクリプト数: {safe_get(page_analysis, 'hasScripts')}個")
-                                log_and_append(f"      Angular検出: {safe_get(page_analysis, 'hasAngular')}")
-                                log_and_append(f"      ページ状態: {safe_get(page_analysis, 'page_ready_state')}")
-                                
-                                # 【重要】セキュリティ・ブロック検出
-                                security = safe_get(page_analysis, 'security_indicators', {})
-                                if isinstance(security, dict):
-                                    log_and_append(f"    🛡️ セキュリティ状況:")
-                                    log_and_append(f"      CAPTCHA: {safe_get(security, 'captcha')}")
-                                    log_and_append(f"      Cloudflare: {safe_get(security, 'cloudflare')}")
-                                    log_and_append(f"      ブロック検出: {safe_get(security, 'blocked_text')}")
-                                    log_and_append(f"      Bot検出: {safe_get(security, 'bot_detected')}")
-                                
-                                # コンテンツサンプル表示
-                                sample = safe_get(page_analysis, 'visible_text_sample')
-                                if sample and sample != 'N/A':
-                                    log_and_append(f"    📝 表示テキストサンプル:")
-                                    log_and_append(f"      '{sample}'")
-                            else:
-                                log_and_append(f"      ⚠️ 予期しないデータ形式: {page_analysis}")
+                            # page_analysisがリストまたは辞書の場合を処理
+                            log_and_append(f"      テキスト長: {safe_get(page_analysis, 'contentLength')}文字")
+                            log_and_append(f"      HTML長: {safe_get(page_analysis, 'htmlLength')}文字") 
+                            log_and_append(f"      子要素数: {safe_get(page_analysis, 'childElementCount')}個")
+                            log_and_append(f"      スクリプト数: {safe_get(page_analysis, 'hasScripts')}個")
+                            log_and_append(f"      Angular検出: {safe_get(page_analysis, 'hasAngular')}")
+                            log_and_append(f"      ページ状態: {safe_get(page_analysis, 'page_ready_state')}")
+                            
+                            # 【重要】セキュリティ・ブロック検出
+                            security = safe_get(page_analysis, 'security_indicators', {})
+                            if security != 'N/A' and security != {}:
+                                log_and_append(f"    🛡️ セキュリティ状況:")
+                                log_and_append(f"      CAPTCHA: {safe_get(security, 'captcha')}")
+                                log_and_append(f"      Cloudflare: {safe_get(security, 'cloudflare')}")
+                                log_and_append(f"      DataDome: {safe_get(security, 'datadome')}")
+                                log_and_append(f"      ブロック検出: {safe_get(security, 'blocked_text')}")
+                                log_and_append(f"      Bot検出: {safe_get(security, 'bot_detected')}")
+                            
+                            # コンテンツサンプル表示
+                            sample = safe_get(page_analysis, 'visible_text_sample')
+                            if sample and sample != 'N/A':
+                                log_and_append(f"    📝 表示テキストサンプル:")
+                                log_and_append(f"      '{sample}'")
                             
                             # hermes-state スクリプトの詳細確認
                             hermes_state_analysis_raw = await tab.evaluate('''
