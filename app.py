@@ -491,7 +491,7 @@ def test_hermes_site_scraping():
                         html_filename = 'hermes_page.html'
                         with open(html_filename, 'w', encoding='utf-8') as f:
                             f.write(full_html)
-                        log_and_append(f"      ✅ HTMLを {html_filename} に保存 ({len(full_html):,} bytes}")
+                        log_and_append(f"      ✅ HTMLを {html_filename} に保存 ({len(full_html):,} bytes)")
                         
                         # 商品データを抽出するスクリプト
                         html_extraction_script = '''
