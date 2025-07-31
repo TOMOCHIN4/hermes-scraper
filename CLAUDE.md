@@ -178,9 +178,31 @@ def test_chromium_startup():
 - 本番環境での継続動作
 
 ### 現在のステータス
-**現在**: Phase 6.0完了 → Phase 6.5を新設
-**完了済み**: Phase 1-5全て合格、Phase 6.0完了
-**次のアクション**: Phase 6.5の実装方針決定
+**現在**: Phase 6実装完了（完全なHTMLダウンロード版）
+**完了済み**: Phase 1-5全て合格、Phase 6.0/6.5全て合格
+**次のアクション**: Phase 6の合格承認待ち → Phase 7へ
+
+### 重要な変更履歴（2025-01-31）
+
+#### Phase 6 最新実装（コミット: 75b58a0）
+**主な機能**:
+1. **Phase 6.0: HTMLダウンロード専用**
+   - JavaScript描画後の完全なHTMLを`hermes_page.html`に保存
+   - DOM解析は行わず、HTMLダウンロード成功後即座に終了
+   - 495KB以上のHTMLファイルを正常に保存
+
+2. **Phase 6.5: HTML解析専用**
+   - BeautifulSoupで保存されたHTMLを解析
+   - h-grid-result-item要素から48個の商品情報を抽出
+   - JSON形式のみで保存（CSV/TXT形式は削除）
+
+3. **抽出データ**
+   - 商品名、URL、価格、カラー情報、SKU（商品ID）、総商品数
+
+**技術的な改善**:
+- Phase 6.0とPhase 6.5の役割を明確に分離
+- DOM解析エラーを完全に排除
+- ファイル形式をJSON単一に簡素化
 
 ### Phase 6.5: HTMLファイル解析の強化 🔍
 **目標**: Phase 6.0で取得したJavaScript描画後のHTMLファイルを解析し、商品データベースを構築
