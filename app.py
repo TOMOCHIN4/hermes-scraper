@@ -6,6 +6,7 @@ from datetime import datetime
 import traceback
 import json
 import time
+import re
 
 def normalize_nodriver_result(result):
     """nodriverが返す特殊なリスト形式を辞書形式に変換"""
@@ -1068,7 +1069,85 @@ def test_hermes_site_scraping():
     
     log_and_append("")
     
+    # Phase 6.5: HTMLファイル解析の強化
+    if successful_connections > 0 and os.path.exists('hermes_page.html'):
+        log_and_append("")
+        log_and_append("🔍 Phase 6.5: HTMLファイル解析の強化")
+        log_and_append("  保存されたHTMLファイルを詳細解析します...")
+        
+        try:
+            from bs4 import BeautifulSoup
+            
+            with open('hermes_page.html', 'r', encoding='utf-8') as f:
+                html_content = f.read()
+            
+            soup = BeautifulSoup(html_content, 'html.parser')
+            phase65_products = []
+            
+            # h-grid-result-item要素から商品情報を抽出
+            grid_items = soup.find_all('h-grid-result-item')
+            log_and_append(f"  h-grid-result-item要素: {len(grid_items)}個")
+            
+            if grid_items:
+                for i, item in enumerate(grid_items[:10]):  # 最初の10個をテスト
+                    product_info = {}
+                    
+                    # 商品リンクを探す
+                    link = item.find('a', id=re.compile(r'product-item-meta-link-'))
+                    if not link:
+                        link = item.find('a', id=re.compile(r'product-item-meta-name-'))
+                    
+                    if link:
+                        product_info['url'] = link.get('href', '')
+                        product_info['sku'] = product_info['url'].split('/')[-1] if product_info['url'] else ''
+                        
+                        # 商品名を探す（より詳細な探索）
+                        # 方法1: product-titleクラス
+                        title_elem = item.find(class_='product-title')
+                        if title_elem:
+                            product_info['name'] = title_elem.get_text(strip=True)
+                        else:
+                            # 方法2: リンク内のテキスト
+                            all_text = []
+                            for elem in item.find_all(text=True):
+                                text = elem.strip()
+                                if text and len(text) > 5 and not text.startswith('<'):
+                                    all_text.append(text)
+                            
+                            # 商品名らしいテキストを探す
+                            for text in all_text:
+                                if '財布' in text or 'バッグ' in text or any(c in text for c in ['《', '》']):
+                                    product_info['name'] = text
+                                    break
+                        
+                        # 価格を探す
+                        price_elem = item.find(class_='price')
+                        if price_elem:
+                            product_info['price'] = price_elem.get_text(strip=True)
+                        else:
+                            # 価格パターンを正規表現で探す
+                            price_match = re.search(r'¥[\d,]+', str(item))
+                            if price_match:
+                                product_info['price'] = price_match.group()
+                        
+                        # 何か情報が取得できたら追加
+                        if product_info.get('name') or product_info.get('price'):
+                            phase65_products.append(product_info)
+            
+            if phase65_products:
+                log_and_append(f"  ✅ Phase 6.5で{len(phase65_products)}個の商品情報を抽出")
+                # Phase 6.5の結果を保存
+                with open('hermes_products_phase65.json', 'w', encoding='utf-8') as f:
+                    json.dump(phase65_products, f, ensure_ascii=False, indent=2)
+                extraction_success = True
+            else:
+                log_and_append("  ⚠️ Phase 6.5でも商品情報の抽出に失敗")
+            
+        except Exception as phase65_error:
+            log_and_append(f"  ❌ Phase 6.5エラー: {str(phase65_error)}")
+    
     # 総合評価
+    log_and_append("")
     log_and_append("📊 Phase 6 総合評価:")
     
     if hermes_success:
