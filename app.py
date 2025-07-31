@@ -60,6 +60,7 @@ def test_hermes_site_scraping():
     
     async def test_hermes_functionality():
         browser = None
+        hermes_success = False  # Phase 6.0の成功フラグを初期化
         try:
             # nodriverインポート
             import nodriver as nd
@@ -1035,10 +1036,11 @@ def test_hermes_site_scraping():
             security_total = len(security_checks) if isinstance(security_checks, dict) else 0
             log_and_append(f"  セキュリティ: {security_ok_count}/{security_total}項目OK")
             
-            # 成功判定（商品情報の保存が必須）
-            hermes_success = extraction_success and successful_connections > 0
+            # Phase 6.0の成功判定はHTML保存の成否で判断（Phase 6.5とは独立）
+            # hermes_successは既に設定済み（HTMLダウンロード成功時）
+            # ここでは変更しない
             
-            return hermes_success
+            return hermes_success if 'hermes_success' in locals() else False
             
         except Exception as e:
             log_and_append(f"❌ エルメスサイトテスト全体エラー: {type(e).__name__}: {e}")
@@ -1095,8 +1097,13 @@ def test_hermes_site_scraping():
             log_and_append(f"  h-grid-result-item要素: {len(grid_items)}個")
             
             if grid_items:
-                for i, item in enumerate(grid_items[:10]):  # 最初の10個をテスト
+                log_and_append(f"  商品情報を抽出中...")
+                for i, item in enumerate(grid_items):  # 全ての商品を処理
                     product_info = {}
+                    
+                    # 進捗表示（10個ごと）
+                    if (i + 1) % 10 == 0:
+                        log_and_append(f"    処理中: {i + 1}/{len(grid_items)}")
                     
                     # 商品リンクを探す
                     link = item.find('a', id=re.compile(r'product-item-meta-link-'))
@@ -1142,9 +1149,44 @@ def test_hermes_site_scraping():
             
             if phase65_products:
                 log_and_append(f"  ✅ Phase 6.5で{len(phase65_products)}個の商品情報を抽出")
-                # Phase 6.5の結果を保存
-                with open('hermes_products_phase65.json', 'w', encoding='utf-8') as f:
-                    json.dump(phase65_products, f, ensure_ascii=False, indent=2)
+                
+                # Phase 6.5の結果を保存（メインの商品ファイルを更新）
+                products_data = {
+                    "total": len(phase65_products),
+                    "extracted": len(phase65_products),
+                    "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
+                    "products": phase65_products,
+                    "source": "Phase 6.5 HTML Analysis"
+                }
+                
+                # JSON保存
+                with open('hermes_products.json', 'w', encoding='utf-8') as f:
+                    json.dump(products_data, f, ensure_ascii=False, indent=2)
+                
+                # CSV保存
+                with open('hermes_products.csv', 'w', encoding='utf-8-sig', newline='') as f:
+                    if phase65_products:
+                        fieldnames = list(phase65_products[0].keys())
+                        writer = csv.DictWriter(f, fieldnames=fieldnames)
+                        writer.writeheader()
+                        writer.writerows(phase65_products)
+                
+                # TXT保存
+                with open('hermes_products.txt', 'w', encoding='utf-8') as f:
+                    f.write(f"エルメス商品情報 (Phase 6.5)\n")
+                    f.write(f"抽出日時: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write(f"抽出成功: {len(phase65_products)}件\n")
+                    f.write("=" * 80 + "\n\n")
+                    
+                    for i, product in enumerate(phase65_products, 1):
+                        f.write(f"商品 {i}/{len(phase65_products)}\n")
+                        f.write(f"商品名: {product.get('name', 'N/A')}\n")
+                        f.write(f"価格: {product.get('price', 'N/A')}\n")
+                        f.write(f"URL: {product.get('url', 'N/A')}\n")
+                        f.write(f"SKU: {product.get('sku', 'N/A')}\n")
+                        f.write("-" * 40 + "\n\n")
+                
+                log_and_append("  💾 商品データを3形式で保存完了")
                 extraction_success = True
             else:
                 log_and_append("  ⚠️ Phase 6.5でも商品情報の抽出に失敗")
