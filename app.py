@@ -42,7 +42,7 @@ def test_hermes_site_scraping():
     print("")
     sys.stdout.flush()
     
-    log_and_append("=== Phase 6: エルメスサイト特化テスト (v2025.01.31.8) ===")
+    log_and_append("=== Phase 6: エルメスサイト特化テスト (v2025.01.31.9) ===")
     log_and_append(f"実行時刻: {datetime.now()}")
     log_and_append("")
     
@@ -102,8 +102,8 @@ def test_hermes_site_scraping():
                 }
             ]
             
-            nonlocal successful_connections  # 外側スコープの変数を使用
-            nonlocal extraction_success  # 外側スコープの変数を使用
+            successful_connections = 0
+            extraction_success = False
             accessible_pages = []
             
             for i, site in enumerate(hermes_urls, 1):
@@ -395,8 +395,6 @@ def test_hermes_site_scraping():
             if accessible_pages:
                 log_and_append("  Step 3: 商品情報抽出テスト")
                 
-                # extraction_success は外側スコープから参照
-                
                 for page in accessible_pages:
                     log_and_append(f"    対象ページ: {page['name']}")
                     
@@ -411,10 +409,10 @@ def test_hermes_site_scraping():
                         # 完全なHTMLをダウンロード（Load Moreボタン対応版）
                         log_and_append(f"      📥 完全なHTMLダウンロード開始（全商品読み込み版）")
                         
-                        # Load Moreボタンで全商品を読み込む関数（1回のみクリック版）
+                        # 無限スクロールとLoad Moreボタンで全商品を読み込む関数
                         async def load_all_products_with_monitoring(tab):
-                            """Load Moreボタンを1回クリックして全商品を読み込む"""
-                            log_and_append("      🔄 Load Moreボタンで全商品読み込み開始（1回クリック版）")
+                            """スクロールとLoad Moreボタンの両方で全商品を読み込む"""
+                            log_and_append("      🔄 全商品読み込み開始（無限スクロール対応版）")
                             
                             try:
                                 # 初期商品数を取得
@@ -440,124 +438,145 @@ def test_hermes_site_scraping():
                                     log_and_append(f"        ✅ 既に全商品が表示されています")
                                     return True
                                 
-                                # Load Moreボタンの状態を確認
-                                button_state_raw = await tab.evaluate('''
-                                    (function() {
-                                        const btn = document.querySelector('button[data-testid="Load more items"]');
-                                        return {
-                                            exists: !!btn,
-                                            visible: btn ? btn.offsetParent !== null : false,
-                                            disabled: btn ? (btn.disabled || btn.getAttribute('aria-disabled') === 'true') : true,
-                                            text: btn ? btn.textContent.trim() : ''
-                                        };
-                                    })()
-                                ''')
-                                button_state = normalize_nodriver_result(button_state_raw)
-                                
-                                # ボタンが存在しない、見えない、または無効な場合は終了
-                                if not button_state.get('exists') or not button_state.get('visible') or button_state.get('disabled'):
-                                    log_and_append(f"        Load Moreボタンが利用不可: {button_state}")
-                                    return False
-                                
-                                log_and_append(f"        ✅ Load Moreボタン発見: {button_state.get('text')}")
-                                
-                                # クリック前の商品数を記録
-                                pre_click_count = initial_count
-                                
-                                # MutationObserverを設定
+                                # MutationObserverを設定（新商品の追加を監視）
                                 await tab.evaluate('''
-                                        window.loadMoreStatus = {
-                                            newItemsAdded: false,
-                                            initialCount: document.querySelectorAll('h-grid-result-item').length,
-                                            currentCount: document.querySelectorAll('h-grid-result-item').length
-                                        };
-                                        
-                                        if (window.loadMoreObserver) {
-                                            window.loadMoreObserver.disconnect();
-                                        }
-                                        
-                                        window.loadMoreObserver = new MutationObserver((mutations) => {
-                                            const currentItems = document.querySelectorAll('h-grid-result-item');
-                                            window.loadMoreStatus.currentCount = currentItems.length;
-                                            if (currentItems.length > window.loadMoreStatus.initialCount) {
-                                                window.loadMoreStatus.newItemsAdded = true;
-                                            }
-                                        });
-                                        
-                                        const container = document.querySelector('h-grid-results') || document.body;
-                                        window.loadMoreObserver.observe(container, { childList: true, subtree: true });
-                                    ''')
+                                    window.productLoadStatus = {
+                                        initialCount: document.querySelectorAll('h-grid-result-item').length,
+                                        currentCount: document.querySelectorAll('h-grid-result-item').length,
+                                        lastLoadTime: Date.now(),
+                                        isLoading: false
+                                    };
                                     
-                                    # スクロールしてボタンを表示
-                                await tab.evaluate('window.scrollTo(0, document.body.scrollHeight - 500)')
-                                await asyncio.sleep(1.5)  # 人間らしい待機
-                                
-                                # ボタンをクリック
-                                click_result_raw = await tab.evaluate('''
-                                        const btn = document.querySelector('button[data-testid="Load more items"]');
-                                        if (btn && !btn.disabled) {
-                                            btn.click();
-                                            true;
-                                        } else {
-                                            false;
+                                    if (window.productObserver) {
+                                        window.productObserver.disconnect();
+                                    }
+                                    
+                                    window.productObserver = new MutationObserver((mutations) => {
+                                        const currentItems = document.querySelectorAll('h-grid-result-item');
+                                        const newCount = currentItems.length;
+                                        if (newCount > window.productLoadStatus.currentCount) {
+                                            window.productLoadStatus.currentCount = newCount;
+                                            window.productLoadStatus.lastLoadTime = Date.now();
+                                            console.log(`New products loaded: ${newCount} items`);
                                         }
-                                    ''')
-                                click_result = normalize_nodriver_result(click_result_raw)
-                                if isinstance(click_result, dict):
-                                    click_result = click_result.get('value', False)
+                                    });
+                                    
+                                    const container = document.querySelector('h-grid-results') || document.body;
+                                    window.productObserver.observe(container, { childList: true, subtree: true });
+                                ''')
                                 
-                                if not click_result:
-                                    log_and_append(f"        ❌ ボタンクリック失敗")
-                                    return False
+                                previous_count = initial_count
+                                no_change_count = 0
+                                max_attempts = 20  # 最大試行回数
                                 
-                                log_and_append(f"        📍 Load Moreボタンをクリック（1回のみ）")
-                                
-                                # 新商品の読み込みを待つ（最大10秒）
-                                new_items_loaded = False
-                                for wait_attempt in range(20):  # 0.5秒 × 20 = 10秒
-                                    await asyncio.sleep(0.5)
-                                        
-                                    status_raw = await tab.evaluate('window.loadMoreStatus')
-                                    status = normalize_nodriver_result(status_raw)
-                                        
-                                    if status.get('newItemsAdded'):
-                                        current_count = status.get('currentCount', 0)
-                                        added_count = current_count - pre_click_count
-                                        log_and_append(f"        ✅ {added_count}個の新商品を追加 (合計: {current_count}個)")
-                                        new_items_loaded = True
+                                for attempt in range(max_attempts):
+                                    # 現在の商品数を確認
+                                    current_count_raw = await tab.evaluate('document.querySelectorAll("h-grid-result-item").length')
+                                    current_count = normalize_nodriver_result(current_count_raw)
+                                    if isinstance(current_count, dict):
+                                        current_count = current_count.get('value', 0)
+                                    
+                                    # 全商品読み込み完了チェック
+                                    if current_count >= total_products and total_products > 0:
+                                        log_and_append(f"        ✅ 全商品読み込み完了: {current_count}/{total_products}個")
                                         break
                                     
-                                if not new_items_loaded:
-                                    log_and_append(f"        ⚠️ 新商品の読み込みがタイムアウト")
-                                    # もう一度商品数を確認
-                                    final_count_raw = await tab.evaluate('document.querySelectorAll("h-grid-result-item").length')
-                                    final_count = normalize_nodriver_result(final_count_raw)
-                                    if isinstance(final_count, dict):
-                                        final_count = final_count.get('value', 0)
-                                    if final_count > pre_click_count:
-                                        log_and_append(f"        ✅ 実際には{final_count - pre_click_count}個追加されていました")
-                                
-                                # 読み込み完了待機（Ajaxが完了するまで少し長めに待つ）
-                                await asyncio.sleep(3)
+                                    # 方法1: スクロールで読み込みをトリガー
+                                    log_and_append(f"        📜 スクロール試行 {attempt + 1}: 現在{current_count}個")
+                                    
+                                    # ページ最下部までスクロール
+                                    await tab.evaluate('''
+                                        window.scrollTo({
+                                            top: document.body.scrollHeight,
+                                            behavior: 'smooth'
+                                        });
+                                    ''')
+                                    
+                                    # スクロール後の待機（人間らしい動作）
+                                    await asyncio.sleep(2)
+                                    
+                                    # スクロールで新商品が読み込まれたか確認
+                                    await asyncio.sleep(3)  # 読み込み待機
+                                    
+                                    new_count_raw = await tab.evaluate('document.querySelectorAll("h-grid-result-item").length')
+                                    new_count = normalize_nodriver_result(new_count_raw)
+                                    if isinstance(new_count, dict):
+                                        new_count = new_count.get('value', 0)
+                                    
+                                    if new_count > current_count:
+                                        log_and_append(f"        ✅ スクロールで{new_count - current_count}個追加 (合計: {new_count}個)")
+                                        previous_count = new_count
+                                        no_change_count = 0
+                                        continue
+                                    
+                                    # 方法2: Load Moreボタンを試す（スクロールで読み込まれなかった場合）
+                                    button_state_raw = await tab.evaluate('''
+                                        (function() {
+                                            const btn = document.querySelector('button[data-testid="Load more items"]');
+                                            return {
+                                                exists: !!btn,
+                                                visible: btn ? btn.offsetParent !== null : false,
+                                                disabled: btn ? (btn.disabled || btn.getAttribute('aria-disabled') === 'true') : true
+                                            };
+                                        })()
+                                    ''')
+                                    button_state = normalize_nodriver_result(button_state_raw)
+                                    
+                                    if button_state.get('exists') and button_state.get('visible') and not button_state.get('disabled'):
+                                        log_and_append(f"        🔘 Load Moreボタンをクリック")
+                                        
+                                        # ボタンをクリック
+                                        click_result_raw = await tab.evaluate('''
+                                            const btn = document.querySelector('button[data-testid="Load more items"]');
+                                            if (btn && !btn.disabled) {
+                                                btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                                setTimeout(() => btn.click(), 500);
+                                                true;
+                                            } else {
+                                                false;
+                                            }
+                                        ''')
+                                        
+                                        # クリック後の読み込み待機
+                                        await asyncio.sleep(5)
+                                        
+                                        # 新商品が追加されたか確認
+                                        final_count_raw = await tab.evaluate('document.querySelectorAll("h-grid-result-item").length')
+                                        final_count = normalize_nodriver_result(final_count_raw)
+                                        if isinstance(final_count, dict):
+                                            final_count = final_count.get('value', 0)
+                                        
+                                        if final_count > new_count:
+                                            log_and_append(f"        ✅ ボタンクリックで{final_count - new_count}個追加 (合計: {final_count}個)")
+                                            previous_count = final_count
+                                            no_change_count = 0
+                                            continue
+                                    
+                                    # 変化がない場合
+                                    no_change_count += 1
+                                    if no_change_count >= 3:
+                                        log_and_append(f"        ⚠️ これ以上商品が読み込めません（現在: {new_count}個）")
+                                        break
+                                    
+                                    # レート制限対策の待機
+                                    await asyncio.sleep(2)
                                 
                                 # クリーンアップ
-                                await tab.evaluate('if (window.loadMoreObserver) window.loadMoreObserver.disconnect()')
+                                await tab.evaluate('if (window.productObserver) window.productObserver.disconnect()')
                                 
-                                # 最終商品数
+                                # 最終結果
                                 final_count_raw = await tab.evaluate('document.querySelectorAll("h-grid-result-item").length')
                                 final_count = normalize_nodriver_result(final_count_raw)
                                 if isinstance(final_count, dict):
                                     final_count = final_count.get('value', 0)
                                 
-                                log_and_append(f"      📊 読み込み完了: 初期{initial_count}個 → 最終{final_count}個 (1回クリック)")
+                                log_and_append(f"      📊 読み込み完了: 初期{initial_count}個 → 最終{final_count}個")
                                 
-                                # 全商品が読み込まれたか確認
                                 if final_count >= total_products and total_products > 0:
-                                    log_and_append(f"      ✅ 全商品読み込み成功: {final_count}/{total_products}個")
-                                elif final_count > initial_count:
-                                    log_and_append(f"      ⚠️ 一部読み込み成功: {final_count}個（総数: {total_products}個）")
+                                    log_and_append(f"      ✅ 全商品読み込み成功！")
                                 else:
-                                    log_and_append(f"      ❌ 追加商品なし")
+                                    log_and_append(f"      ⚠️ 一部のみ読み込み: {final_count}/{total_products}個")
+                                
                                 return True
                                 
                             except Exception as e:
@@ -624,442 +643,12 @@ def test_hermes_site_scraping():
                             
                             # Phase 6.0はここで終了（DOM解析は行わない）
                             break
-                        
-                        try:
-                            html_extraction_script = '''
-                        (function() {
-                            try {
-                                // 総商品数を取得
-                                const totalElement = document.querySelector('[data-testid="number-current-result"], span.header-title-current-number-result');
-                                const totalMatch = totalElement ? totalElement.textContent.match(/\\((\\d+)\\)/) : null;
-                                const total = totalMatch ? parseInt(totalMatch[1]) : 0;
-                                
-                                // 商品リンクを複数の方法で取得（より確実）
-                                // 1. product-item-meta-link IDを持つリンク（48個）
-                                // 2. product-item-meta-name IDを持つリンク（48個）
-                                // 3. 商品URLを含むリンク（バックアップ）
-                                const productLinks = document.querySelectorAll('a[id^="product-item-meta-link-"], a[id^="product-item-meta-name-"], a[href*="/jp/ja/product/"]');
-                                const products = [];
-                                
-                                console.log('Found product links:', productLinks.length);
-                                
-                                productLinks.forEach((linkElement, index) => {
-                                    // URL
-                                    const url = linkElement.href || linkElement.getAttribute('href') || 'N/A';
-                                    
-                                    // 重複チェック
-                                    if (products.some(p => p.url === url)) {
-                                        return;
-                                    }
-                                    
-                                    // 商品名（リンク内のproduct-titleクラスを探す）
-                                    const titleElement = linkElement.querySelector('.product-title');
-                                    const title = titleElement ? titleElement.textContent.trim() : 'N/A';
-                                    
-                                    // SKU（URLから抽出）
-                                    let sku = 'N/A';
-                                    const match = url.match(/\/product\/([^\/]+)\//); 
-                                    if (match) {
-                                        sku = match[1];
-                                    }
-                                    
-                                    // 親要素から価格を探す
-                                    const parentItem = linkElement.closest('.product-item') || linkElement.closest('h-grid-result-item');
-                                    const priceElement = parentItem ? parentItem.querySelector('.price') : null;
-                                    const price = priceElement ? priceElement.textContent.trim() : 'N/A';
-                                    
-                                    // カラー情報
-                                    const colorElement = parentItem ? parentItem.querySelector('.product-item-color') : null;
-                                    const color = colorElement ? colorElement.textContent.trim() : '';
-                                    
-                                    products.push({
-                                        title: title,
-                                        url: url,
-                                        sku: sku,
-                                        price: price,
-                                        color: color,
-                                        index: products.length + 1
-                                    });
-                                });
-                                
-                                if (products.length > 0) {
-                                    return {
-                                        success: true,
-                                        data: {
-                                            total: total || products.length,
-                                            extracted: products.length,
-                                            items: products
-                                        }
-                                    };
-                                } else {
-                                    return {
-                                        success: false,
-                                        error: 'No product links found',
-                                        debug: {
-                                            totalElement: !!totalElement,
-                                            linksChecked: productLinks.length
-                                        }
-                                    };
-                                }
-                            } catch (error) {
-                                return { success: false, error: error.message };
-                            }
-                        })()
-                        '''
-                        
-                            html_result_raw = await tab.evaluate(html_extraction_script)
-                            
-                            # nodriverの戻り値を正規化
-                            if isinstance(html_result_raw, list):
-                                # リスト形式の場合、normalize_nodriver_resultで変換
-                                html_result = normalize_nodriver_result(html_result_raw)
-                            else:
-                                # 既に辞書形式の場合はそのまま使用
-                                html_result = html_result_raw
-                            
-                        except Exception as extract_error:
-                            log_and_append(f"      ❌ DOM解析エラー: {extract_error}")
-                            html_result = {'success': False, 'error': f'DOM extraction error: {extract_error}'}
-                            
-                        # 正規化後の結果
-                        normalized_html_result = html_result
-                        
-                        if isinstance(normalized_html_result, dict) and normalized_html_result.get('success'):
-                            product_data = normalized_html_result.get('data', {})
-                            
-                            # product_dataがリストの場合の処理
-                            if isinstance(product_data, list):
-                                log_and_append(f"      ⚠️ product_dataがリスト形式で返されました: {type(product_data)}")
-                                # リストから辞書形式のデータを探す
-                                for item in product_data:
-                                    if isinstance(item, dict) and ('total' in item or 'items' in item):
-                                        product_data = item
-                                        break
-                                else:
-                                    # 適切なデータが見つからない場合
-                                    product_data = {}
-                            
-                            # 辞書として安全にアクセス
-                            if isinstance(product_data, dict):
-                                total_count = product_data.get('total', 0)
-                                extracted_count = product_data.get('extracted', 0)
-                                items = product_data.get('items', [])
-                            else:
-                                log_and_append(f"      ⚠️ product_dataの形式が不正: {type(product_data)}")
-                                total_count = 0
-                                extracted_count = 0
-                                items = []
-                            
-                            # 商品数の検証
-                            if extracted_count > 0 and len(items) > 0:
-                                log_and_append(f"      ✅ 商品データ抽出成功!")
-                                log_and_append(f"      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                                log_and_append(f"      総商品数: {total_count}件")
-                                log_and_append(f"      抽出成功: {extracted_count}件")
-                                log_and_append(f"      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                                log_and_append("")
-                            else:
-                                log_and_append(f"      ⚠️ 商品データ抽出失敗: 商品数が0件")
-                                log_and_append(f"      総商品数: {total_count}件")
-                                log_and_append(f"      抽出成功: {extracted_count}件")
-                                log_and_append(f"      アイテム数: {len(items)}件")
-                                log_and_append("")
-                            
-                            # 商品がある場合のみ表示と成功判定
-                            if len(items) > 0:
-                                # 商品情報を整形して表示
-                                for item in items:
-                                    title_line = f"      {item['index']:>3}. {item['title']}"
-                                    if item.get('color'):
-                                        title_line += f" ({item['color']})"
-                                    log_and_append(title_line)
-                                    
-                                    if item.get('price') and item['price'] != 'N/A':
-                                        log_and_append(f"          価格: {item['price']}")
-                                    log_and_append(f"          URL: {item['url']}")
-                                    log_and_append("")  # 商品間の空行
-                                
-                                extraction_success = True
-                            else:
-                                extraction_success = False
-                            
-                            # 商品データを保存（JSON & CSV & TXT）
-                            try:
-                                # safe_get_value関数を定義
-                                def safe_get_value(data, key, default=''):
-                                    """nodriverのネストデータから値を取得"""
-                                    if isinstance(data, dict):
-                                        return data.get(key, default)
-                                    elif isinstance(data, list):
-                                        for item in data:
-                                            if isinstance(item, list) and len(item) == 2 and item[0] == key:
-                                                value_info = item[1]
-                                                if isinstance(value_info, dict) and 'value' in value_info:
-                                                    return value_info['value']
-                                                return value_info
-                                    return default
-                                
-                                # 各商品データから必要なフィールドのみ抽出
-                                cleaned_items = []
-                                for item in items:
-                                    # nodriverのネスト構造に対応
-                                    if isinstance(item, dict) and item.get('type') == 'object' and 'value' in item:
-                                        item_data = item['value']
-                                    else:
-                                        item_data = item
-                                        
-                                    cleaned_item = {
-                                        'index': safe_get_value(item_data, 'index', ''),
-                                        'title': safe_get_value(item_data, 'title', ''),
-                                        'color': safe_get_value(item_data, 'color', ''),
-                                        'price': safe_get_value(item_data, 'price', ''),
-                                        'sku': safe_get_value(item_data, 'sku', ''),
-                                        'url': safe_get_value(item_data, 'url', '')
-                                    }
-                                    cleaned_items.append(cleaned_item)
-                                
-                                # 固定ファイル名（上書き保存）
-                                json_filename = "hermes_products.json"
-                                csv_filename = "hermes_products.csv"
-                                txt_filename = "hermes_products.txt"
-                                
-                                # JSON形式で保存
-                                products_data = {
-                                    "total": total_count,
-                                    "extracted": extracted_count,
-                                    "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
-                                    "products": cleaned_items
-                                }
-                                with open(json_filename, 'w', encoding='utf-8') as f:
-                                    json.dump(products_data, f, ensure_ascii=False, indent=2)
-                                
-                                # CSV形式で保存（不要なフィールドを除外）
-                                import csv
-                                with open(csv_filename, 'w', encoding='utf-8-sig', newline='') as f:
-                                    fieldnames = ['index', 'title', 'color', 'price', 'sku', 'url']
-                                    writer = csv.DictWriter(f, fieldnames=fieldnames)
-                                    writer.writeheader()
-                                    
-                                    writer.writerows(cleaned_items)
-                                
-                                # テキスト形式で保存（商品名、URL、総数）
-                                with open(txt_filename, 'w', encoding='utf-8') as f:
-                                    f.write(f"エルメス商品情報\n")
-                                    f.write(f"抽出日時: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-                                    f.write(f"総商品数: {total_count}件\n")
-                                    f.write(f"抽出成功: {extracted_count}件\n")
-                                    f.write("=" * 80 + "\n\n")
-                                    
-                                    for item in cleaned_items:
-                                        f.write(f"商品 {item.get('index', 'N/A')}/{extracted_count}\n")
-                                        f.write(f"商品名: {item.get('title', 'N/A')}\n")
-                                        if item.get('color'):
-                                            f.write(f"カラー: {item.get('color')}\n")
-                                        f.write(f"価格: {item.get('price', 'N/A')}\n")
-                                        f.write(f"URL: {item.get('url', 'N/A')}\n")
-                                        f.write(f"SKU: {item.get('sku', 'N/A')}\n")
-                                        f.write("-" * 40 + "\n\n")
-                                
-                                log_and_append(f"      💾 データ保存完了:")
-                                log_and_append(f"         - HTML: {html_filename} ({len(full_html):,} bytes)")
-                                log_and_append(f"         - JSON: {json_filename}")
-                                log_and_append(f"         - CSV: {csv_filename}")
-                                log_and_append(f"         - TXT: {txt_filename}")
-                            except Exception as save_error:
-                                log_and_append(f"      ⚠️ データ保存エラー: {save_error}")
-                            
-                            break
-                            
-                        else:
-                            if isinstance(normalized_html_result, dict):
-                                error_msg = normalized_html_result.get('error', 'Unknown error')
-                            else:
-                                error_msg = str(normalized_html_result)
-                            log_and_append(f"      ⚠️ HTML抽出失敗: {error_msg}")
-                            
-                            if isinstance(normalized_html_result, dict) and 'debug' in normalized_html_result:
-                                debug_info = normalized_html_result['debug']
-                                log_and_append(f"      デバッグ情報:")
-                                log_and_append(f"        総数要素: {debug_info.get('totalElement', False)}")
-                                log_and_append(f"        商品要素数: {debug_info.get('productElements', 0)}")
-                                if 'firstElementHTML' in debug_info:
-                                    log_and_append(f"        最初の要素: {debug_info['firstElementHTML'][:100]}...")
-                                
-                                # フォールバック: 標準セレクタも試行
-                                log_and_append(f"      フォールバック: 標準セレクタを試行")
-                                
-                                fallback_selectors = ["h-grid-result-item", ".grid-item", "article"]
-                                for selector in fallback_selectors:
-                                    count_script = f"document.querySelectorAll('{selector}').length"
-                                    count_raw = await tab.evaluate(count_script)
-                                    count = normalize_nodriver_result(count_raw)
-                                    if isinstance(count, dict):
-                                        count = count.get('count', count.get('value', 0))
-                                    log_and_append(f"        セレクタ '{selector}': {count}件")
-                                    
-                                    if count > 0:
-                                        log_and_append(f"      ✅ フォールバック成功: {selector}で{count}件発見")
-                                        
-                                        # フォールバックで商品を発見したら、実際にデータを抽出
-                                        log_and_append(f"      📥 フォールバック商品データ抽出開始...")
-                                        fallback_script = f'''
-                                        (function() {{
-                                            const elements = document.querySelectorAll('{selector}');
-                                            const products = [];
-                                            
-                                            elements.forEach((element, index) => {{
-                                                // 商品リンクを探す
-                                                const linkElement = element.querySelector('a.product-item-name, a[class*="product"], a[href*="/product/"]');
-                                                if (!linkElement) return;
-                                                
-                                                // 商品名
-                                                const titleElement = linkElement.querySelector('.product-title');
-                                                const title = titleElement ? titleElement.textContent.trim() : 'N/A';
-                                                
-                                                // URL
-                                                const url = linkElement.href || linkElement.getAttribute('href') || 'N/A';
-                                                
-                                                // SKU
-                                                const sku = linkElement.id ? linkElement.id.replace('product-item-meta-link-', '') : 'N/A';
-                                                
-                                                // 価格
-                                                const priceElement = element.querySelector('.price, [class*="price"]');
-                                                const price = priceElement ? priceElement.textContent.trim() : 'N/A';
-                                                
-                                                // カラー
-                                                const colorElement = element.querySelector('.product-item-color');
-                                                const color = colorElement ? colorElement.textContent.trim() : '';
-                                                
-                                                products.push({{
-                                                    title: title,
-                                                    url: url,
-                                                    sku: sku,
-                                                    price: price,
-                                                    color: color,
-                                                    index: index + 1
-                                                }});
-                                            }});
-                                            
-                                            return {{
-                                                total: elements.length,
-                                                extracted: products.length,
-                                                items: products
-                                            }};
-                                        }})()
-                                        '''
-                                        
-                                        fallback_result_raw = await tab.evaluate(fallback_script)
-                                        fallback_result = normalize_nodriver_result(fallback_result_raw)
-                                        
-                                        if isinstance(fallback_result, dict) and fallback_result.get('extracted', 0) > 0:
-                                            total_count = fallback_result.get('total', 0)
-                                            extracted_count = fallback_result.get('extracted', 0)
-                                            items = fallback_result.get('items', [])
-                                            
-                                            log_and_append(f"      ✅ フォールバック抽出成功: {extracted_count}/{total_count}件")
-                                            
-                                            # 商品データを保存（JSON & CSV & TXT）
-                                            try:
-                                                # safe_get_value関数を定義
-                                                def safe_get_value(data, key, default=''):
-                                                    """nodriverのネストデータから値を取得"""
-                                                    if isinstance(data, dict):
-                                                        return data.get(key, default)
-                                                    elif isinstance(data, list):
-                                                        for item in data:
-                                                            if isinstance(item, list) and len(item) == 2 and item[0] == key:
-                                                                value_info = item[1]
-                                                                if isinstance(value_info, dict) and 'value' in value_info:
-                                                                    return value_info['value']
-                                                                return value_info
-                                                    return default
-                                                
-                                                # 各商品データから必要なフィールドのみ抽出
-                                                cleaned_items = []
-                                                for item in items:
-                                                    # nodriverのネスト構造に対応
-                                                    if isinstance(item, dict) and item.get('type') == 'object' and 'value' in item:
-                                                        item_data = item['value']
-                                                    else:
-                                                        item_data = item
-                                                        
-                                                    cleaned_item = {
-                                                        'index': safe_get_value(item_data, 'index', ''),
-                                                        'title': safe_get_value(item_data, 'title', ''),
-                                                        'color': safe_get_value(item_data, 'color', ''),
-                                                        'price': safe_get_value(item_data, 'price', ''),
-                                                        'sku': safe_get_value(item_data, 'sku', ''),
-                                                        'url': safe_get_value(item_data, 'url', '')
-                                                    }
-                                                    cleaned_items.append(cleaned_item)
-                                                
-                                                # 固定ファイル名（上書き保存）
-                                                json_filename = "hermes_products.json"
-                                                csv_filename = "hermes_products.csv"
-                                                txt_filename = "hermes_products.txt"
-                                                
-                                                # JSON形式で保存
-                                                products_data = {
-                                                    "total": total_count,
-                                                    "extracted": extracted_count,
-                                                    "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
-                                                    "products": cleaned_items
-                                                }
-                                                with open(json_filename, 'w', encoding='utf-8') as f:
-                                                    json.dump(products_data, f, ensure_ascii=False, indent=2)
-                                                
-                                                # CSV形式で保存（不要なフィールドを除外）
-                                                import csv
-                                                with open(csv_filename, 'w', encoding='utf-8-sig', newline='') as f:
-                                                    fieldnames = ['index', 'title', 'color', 'price', 'sku', 'url']
-                                                    writer = csv.DictWriter(f, fieldnames=fieldnames)
-                                                    writer.writeheader()
-                                                    
-                                                    writer.writerows(cleaned_items)
-                                                
-                                                # テキスト形式で保存（商品名、URL、総数）
-                                                with open(txt_filename, 'w', encoding='utf-8') as f:
-                                                    f.write(f"エルメス商品情報\n")
-                                                    f.write(f"抽出日時: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-                                                    f.write(f"総商品数: {total_count}件\n")
-                                                    f.write(f"抽出成功: {extracted_count}件\n")
-                                                    f.write("=" * 80 + "\n\n")
-                                                    
-                                                    for item in cleaned_items:
-                                                        f.write(f"商品 {item.get('index', 'N/A')}/{extracted_count}\n")
-                                                        f.write(f"商品名: {item.get('title', 'N/A')}\n")
-                                                        if item.get('color'):
-                                                            f.write(f"カラー: {item.get('color')}\n")
-                                                        f.write(f"価格: {item.get('price', 'N/A')}\n")
-                                                        f.write(f"URL: {item.get('url', 'N/A')}\n")
-                                                        f.write(f"SKU: {item.get('sku', 'N/A')}\n")
-                                                        f.write("-" * 40 + "\n\n")
-                                                
-                                                log_and_append(f"      💾 フォールバックデータ保存完了:")
-                                                log_and_append(f"         - JSON: {json_filename}")
-                                                log_and_append(f"         - CSV: {csv_filename}")
-                                                log_and_append(f"         - TXT: {txt_filename}")
-                                                
-                                                extraction_success = True
-                                            except Exception as save_error:
-                                                log_and_append(f"      ⚠️ フォールバックデータ保存エラー: {save_error}")
-                                                extraction_success = False
-                                        else:
-                                            log_and_append(f"      ❌ フォールバック抽出失敗")
-                                            extraction_success = False
-                                        
-                                        break
-                        
-                        if extraction_success:
-                            break
                             
                     except Exception as extract_error:
                         log_and_append(f"    ❌ 抽出テストエラー: {extract_error}")
                 
-                # Phase 6.0ではDOM解析を行わないため、この部分は不要
             else:
                 log_and_append("  Step 3: スキップ（接続成功ページなし）")
-                # extraction_success は既に False
             
             log_and_append("")
             
@@ -1124,10 +713,6 @@ def test_hermes_site_scraping():
             security_ok_count = len([k for k, v in security_checks.items() if not v]) if isinstance(security_checks, dict) else 0
             security_total = len(security_checks) if isinstance(security_checks, dict) else 0
             log_and_append(f"  セキュリティ: {security_ok_count}/{security_total}項目OK")
-            
-            # Phase 6.0の成功判定はHTML保存の成否で判断（Phase 6.5とは独立）
-            # hermes_successは既に設定済み（HTMLダウンロード成功時）
-            # ここでは変更しない
             
             return hermes_success if 'hermes_success' in locals() else False
             
