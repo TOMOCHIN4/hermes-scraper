@@ -216,7 +216,15 @@ def test_hermes_site_scraping():
                                     elif isinstance(data, list) and len(data) > 0:
                                         # nodriverが配列で返す場合の処理
                                         for item in data:
-                                            if isinstance(item, dict) and key in item:
+                                            if isinstance(item, list) and len(item) == 2:
+                                                # ['key', {'value': xxx}] 形式
+                                                if item[0] == key:
+                                                    value_info = item[1]
+                                                    if isinstance(value_info, dict) and 'value' in value_info:
+                                                        return value_info['value']
+                                                    else:
+                                                        return value_info
+                                            elif isinstance(item, dict) and key in item:
                                                 return item[key]
                                         return default
                                     else:
@@ -520,10 +528,18 @@ def test_hermes_site_scraping():
                                             normalized_html_result[key] = value_info['value']
                                         else:
                                             normalized_html_result[key] = value_info
+                                    elif isinstance(item, dict):
+                                        # 既に辞書形式の場合
+                                        normalized_html_result.update(item)
                             else:
                                 normalized_html_result = html_result
                             
-                            if isinstance(normalized_html_result, dict) and normalized_html_result.get('success'):
+                            # 正規化後の結果確認
+                            if not isinstance(normalized_html_result, dict):
+                                log_and_append(f"      ⚠️ データ正規化失敗: type={type(normalized_html_result)}")
+                                normalized_html_result = {}
+                            
+                            if normalized_html_result.get('success'):
                                 product_data = normalized_html_result['data']
                                 total_count = product_data.get('total', 0)
                                 extracted_count = product_data.get('extracted', 0)
