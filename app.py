@@ -535,33 +535,42 @@ def test_hermes_site_scraping():
                                 const totalMatch = totalElement ? totalElement.textContent.match(/\\((\\d+)\\)/) : null;
                                 const total = totalMatch ? parseInt(totalMatch[1]) : 0;
                                 
-                                // 商品要素を取得
-                                const productElements = document.querySelectorAll('h-grid-result-item, div.product-grid-list-item');
+                                // 商品リンクを複数の方法で取得（より確実）
+                                // 1. product-item-meta-link IDを持つリンク（48個）
+                                // 2. product-item-meta-name IDを持つリンク（48個）
+                                // 3. 商品URLを含むリンク（バックアップ）
+                                const productLinks = document.querySelectorAll('a[id^="product-item-meta-link-"], a[id^="product-item-meta-name-"], a[href*="/jp/ja/product/"]');
                                 const products = [];
                                 
-                                productElements.forEach((element, index) => {
-                                    // 全件処理（制限なし）
-                                    
-                                    // 商品リンク要素を探す（複数のセレクタを試す）
-                                    const linkElement = element.querySelector('a.product-item-name, a[class*="product"], a[href*="/product/"]');
-                                    if (!linkElement) return;
-                                    
-                                    // 商品名
-                                    const titleElement = linkElement.querySelector('.product-title');
-                                    const title = titleElement ? titleElement.textContent.trim() : 'N/A';
-                                    
+                                console.log('Found product links:', productLinks.length);
+                                
+                                productLinks.forEach((linkElement, index) => {
                                     // URL
                                     const url = linkElement.href || linkElement.getAttribute('href') || 'N/A';
                                     
-                                    // SKU（商品ID）
-                                    const sku = linkElement.id ? linkElement.id.replace('product-item-meta-link-', '') : 'N/A';
+                                    // 重複チェック
+                                    if (products.some(p => p.url === url)) {
+                                        return;
+                                    }
                                     
-                                    // 価格を探す
-                                    const priceElement = element.querySelector('.price, [class*="price"]');
+                                    // 商品名（リンク内のproduct-titleクラスを探す）
+                                    const titleElement = linkElement.querySelector('.product-title');
+                                    const title = titleElement ? titleElement.textContent.trim() : 'N/A';
+                                    
+                                    // SKU（URLから抽出）
+                                    let sku = 'N/A';
+                                    const match = url.match(/\/product\/([^\/]+)\//); 
+                                    if (match) {
+                                        sku = match[1];
+                                    }
+                                    
+                                    // 親要素から価格を探す
+                                    const parentItem = linkElement.closest('.product-item') || linkElement.closest('h-grid-result-item');
+                                    const priceElement = parentItem ? parentItem.querySelector('.price') : null;
                                     const price = priceElement ? priceElement.textContent.trim() : 'N/A';
                                     
-                                    // カラー情報（オプション）
-                                    const colorElement = element.querySelector('.product-item-color');
+                                    // カラー情報
+                                    const colorElement = parentItem ? parentItem.querySelector('.product-item-color') : null;
                                     const color = colorElement ? colorElement.textContent.trim() : '';
                                     
                                     products.push({
@@ -570,7 +579,7 @@ def test_hermes_site_scraping():
                                         sku: sku,
                                         price: price,
                                         color: color,
-                                        index: index + 1
+                                        index: products.length + 1
                                     });
                                 });
                                 
@@ -578,23 +587,19 @@ def test_hermes_site_scraping():
                                     return {
                                         success: true,
                                         data: {
-                                            total: total,
+                                            total: total || products.length,
                                             extracted: products.length,
                                             items: products
                                         }
                                     };
                                 } else {
-                                    // デバッグ用: 要素の検索状況
-                                    const debugInfo = {
-                                        totalElement: !!totalElement,
-                                        productElements: productElements.length,
-                                        firstElementHTML: productElements[0] ? productElements[0].outerHTML.substring(0, 200) : 'N/A'
-                                    };
-                                    
                                     return {
                                         success: false,
-                                        error: 'No products found in HTML',
-                                        debug: debugInfo
+                                        error: 'No product links found',
+                                        debug: {
+                                            totalElement: !!totalElement,
+                                            linksChecked: productLinks.length
+                                        }
                                     };
                                 }
                             } catch (error) {
