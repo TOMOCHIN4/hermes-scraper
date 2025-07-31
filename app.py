@@ -100,7 +100,8 @@ def test_hermes_site_scraping():
                 }
             ]
             
-            successful_connections = 0
+            nonlocal successful_connections  # 外側スコープの変数を使用
+            nonlocal extraction_success  # 外側スコープの変数を使用
             accessible_pages = []
             
             for i, site in enumerate(hermes_urls, 1):
@@ -458,7 +459,7 @@ def test_hermes_site_scraping():
             if accessible_pages:
                 log_and_append("  Step 3: 商品情報抽出テスト")
                 
-                extraction_success = False
+                # extraction_success は外側スコープから参照
                 
                 for page in accessible_pages:
                     log_and_append(f"    対象ページ: {page['name']}")
@@ -717,7 +718,9 @@ def test_hermes_site_scraping():
                                         break
                         
                         except Exception as html_error:
-                            log_and_append(f"      ❌ HTML抽出エラー: {html_error}")
+                            log_and_append(f"      ❌ HTML抽出エラー: {type(html_error).__name__}: {html_error}")
+                            import traceback
+                            log_and_append(f"      スタックトレース: {traceback.format_exc()}")
                         
                         if extraction_success:
                             break
@@ -731,7 +734,7 @@ def test_hermes_site_scraping():
                     log_and_append("    ⚠️ 商品情報抽出: 該当要素なし（通常の商品ページではない可能性）")
             else:
                 log_and_append("  Step 3: スキップ（接続成功ページなし）")
-                extraction_success = False
+                # extraction_success は既に False
             
             log_and_append("")
             
@@ -821,6 +824,9 @@ def test_hermes_site_scraping():
                 log_and_append("✅ クリーンアップ完了")
     
     # 非同期テストを実行
+    successful_connections = 0  # グローバルスコープに変数を移動
+    extraction_success = False  # グローバルスコープに変数を移動
+    
     try:
         hermes_success = asyncio.run(test_hermes_functionality())
     except Exception as e:
