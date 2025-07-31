@@ -760,12 +760,27 @@ def test_hermes_site_scraping():
                                 with open(json_filename, 'w', encoding='utf-8') as f:
                                     json.dump(products_data, f, ensure_ascii=False, indent=2)
                                 
-                                # CSV形式で保存
+                                # CSV形式で保存（不要なフィールドを除外）
                                 import csv
                                 with open(csv_filename, 'w', encoding='utf-8-sig', newline='') as f:
-                                    writer = csv.DictWriter(f, fieldnames=['index', 'title', 'color', 'price', 'sku', 'url'])
+                                    fieldnames = ['index', 'title', 'color', 'price', 'sku', 'url']
+                                    writer = csv.DictWriter(f, fieldnames=fieldnames)
                                     writer.writeheader()
-                                    writer.writerows(items)
+                                    
+                                    # 各商品データから必要なフィールドのみ抽出
+                                    cleaned_items = []
+                                    for item in items:
+                                        cleaned_item = {
+                                            'index': item.get('index', ''),
+                                            'title': item.get('title', ''),
+                                            'color': item.get('color', ''),
+                                            'price': item.get('price', ''),
+                                            'sku': item.get('sku', ''),
+                                            'url': item.get('url', '')
+                                        }
+                                        cleaned_items.append(cleaned_item)
+                                    
+                                    writer.writerows(cleaned_items)
                                 
                                 # テキスト形式で保存（商品名、URL、総数）
                                 with open(txt_filename, 'w', encoding='utf-8') as f:
@@ -776,13 +791,13 @@ def test_hermes_site_scraping():
                                     f.write("=" * 80 + "\n\n")
                                     
                                     for item in items:
-                                        f.write(f"商品 {item['index']}/{extracted_count}\n")
-                                        f.write(f"商品名: {item['title']}\n")
-                                        if item['color']:
-                                            f.write(f"カラー: {item['color']}\n")
-                                        f.write(f"価格: {item['price']}\n")
-                                        f.write(f"URL: {item['url']}\n")
-                                        f.write(f"SKU: {item['sku']}\n")
+                                        f.write(f"商品 {item.get('index', 'N/A')}/{extracted_count}\n")
+                                        f.write(f"商品名: {item.get('title', 'N/A')}\n")
+                                        if item.get('color'):
+                                            f.write(f"カラー: {item.get('color')}\n")
+                                        f.write(f"価格: {item.get('price', 'N/A')}\n")
+                                        f.write(f"URL: {item.get('url', 'N/A')}\n")
+                                        f.write(f"SKU: {item.get('sku', 'N/A')}\n")
                                         f.write("-" * 40 + "\n\n")
                                 
                                 log_and_append(f"      💾 データ保存完了:")
@@ -900,12 +915,27 @@ def test_hermes_site_scraping():
                                                 with open(json_filename, 'w', encoding='utf-8') as f:
                                                     json.dump(products_data, f, ensure_ascii=False, indent=2)
                                                 
-                                                # CSV形式で保存
+                                                # CSV形式で保存（不要なフィールドを除外）
                                                 import csv
                                                 with open(csv_filename, 'w', encoding='utf-8-sig', newline='') as f:
-                                                    writer = csv.DictWriter(f, fieldnames=['index', 'title', 'color', 'price', 'sku', 'url'])
+                                                    fieldnames = ['index', 'title', 'color', 'price', 'sku', 'url']
+                                                    writer = csv.DictWriter(f, fieldnames=fieldnames)
                                                     writer.writeheader()
-                                                    writer.writerows(items)
+                                                    
+                                                    # 各商品データから必要なフィールドのみ抽出
+                                                    cleaned_items = []
+                                                    for item in items:
+                                                        cleaned_item = {
+                                                            'index': item.get('index', ''),
+                                                            'title': item.get('title', ''),
+                                                            'color': item.get('color', ''),
+                                                            'price': item.get('price', ''),
+                                                            'sku': item.get('sku', ''),
+                                                            'url': item.get('url', '')
+                                                        }
+                                                        cleaned_items.append(cleaned_item)
+                                                    
+                                                    writer.writerows(cleaned_items)
                                                 
                                                 # テキスト形式で保存（商品名、URL、総数）
                                                 with open(txt_filename, 'w', encoding='utf-8') as f:
@@ -916,13 +946,13 @@ def test_hermes_site_scraping():
                                                     f.write("=" * 80 + "\n\n")
                                                     
                                                     for item in items:
-                                                        f.write(f"商品 {item['index']}/{extracted_count}\n")
-                                                        f.write(f"商品名: {item['title']}\n")
-                                                        if item['color']:
-                                                            f.write(f"カラー: {item['color']}\n")
-                                                        f.write(f"価格: {item['price']}\n")
-                                                        f.write(f"URL: {item['url']}\n")
-                                                        f.write(f"SKU: {item['sku']}\n")
+                                                        f.write(f"商品 {item.get('index', 'N/A')}/{extracted_count}\n")
+                                                        f.write(f"商品名: {item.get('title', 'N/A')}\n")
+                                                        if item.get('color'):
+                                                            f.write(f"カラー: {item.get('color')}\n")
+                                                        f.write(f"価格: {item.get('price', 'N/A')}\n")
+                                                        f.write(f"URL: {item.get('url', 'N/A')}\n")
+                                                        f.write(f"SKU: {item.get('sku', 'N/A')}\n")
                                                         f.write("-" * 40 + "\n\n")
                                                 
                                                 log_and_append(f"      💾 フォールバックデータ保存完了:")
