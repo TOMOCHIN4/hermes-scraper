@@ -463,9 +463,9 @@ def test_hermes_site_scraping():
                                 
                                 # クリック前の商品数を記録
                                 pre_click_count = initial_count
-                                    
-                                    # MutationObserverを設定
-                                    await tab.evaluate('''
+                                
+                                # MutationObserverを設定
+                                await tab.evaluate('''
                                         window.loadMoreStatus = {
                                             newItemsAdded: false,
                                             initialCount: document.querySelectorAll('h-grid-result-item').length,
@@ -489,11 +489,11 @@ def test_hermes_site_scraping():
                                     ''')
                                     
                                     # スクロールしてボタンを表示
-                                    await tab.evaluate('window.scrollTo(0, document.body.scrollHeight - 500)')
-                                    await asyncio.sleep(1.5)  # 人間らしい待機
-                                    
-                                    # ボタンをクリック
-                                    click_result_raw = await tab.evaluate('''
+                                await tab.evaluate('window.scrollTo(0, document.body.scrollHeight - 500)')
+                                await asyncio.sleep(1.5)  # 人間らしい待機
+                                
+                                # ボタンをクリック
+                                click_result_raw = await tab.evaluate('''
                                         const btn = document.querySelector('button[data-testid="Load more items"]');
                                         if (btn && !btn.disabled) {
                                             btn.click();
@@ -502,43 +502,43 @@ def test_hermes_site_scraping():
                                             false;
                                         }
                                     ''')
-                                    click_result = normalize_nodriver_result(click_result_raw)
-                                    if isinstance(click_result, dict):
-                                        click_result = click_result.get('value', False)
-                                    
-                                    if not click_result:
-                                        log_and_append(f"        ❌ ボタンクリック失敗")
-                                        return False
-                                    
-                                    log_and_append(f"        📍 Load Moreボタンをクリック（1回のみ）")
-                                    
-                                    # 新商品の読み込みを待つ（最大10秒）
-                                    new_items_loaded = False
-                                    for wait_attempt in range(20):  # 0.5秒 × 20 = 10秒
-                                        await asyncio.sleep(0.5)
+                                click_result = normalize_nodriver_result(click_result_raw)
+                                if isinstance(click_result, dict):
+                                    click_result = click_result.get('value', False)
+                                
+                                if not click_result:
+                                    log_and_append(f"        ❌ ボタンクリック失敗")
+                                    return False
+                                
+                                log_and_append(f"        📍 Load Moreボタンをクリック（1回のみ）")
+                                
+                                # 新商品の読み込みを待つ（最大10秒）
+                                new_items_loaded = False
+                                for wait_attempt in range(20):  # 0.5秒 × 20 = 10秒
+                                    await asyncio.sleep(0.5)
                                         
-                                        status_raw = await tab.evaluate('window.loadMoreStatus')
-                                        status = normalize_nodriver_result(status_raw)
+                                    status_raw = await tab.evaluate('window.loadMoreStatus')
+                                    status = normalize_nodriver_result(status_raw)
                                         
-                                        if status.get('newItemsAdded'):
-                                            current_count = status.get('currentCount', 0)
-                                            added_count = current_count - pre_click_count
-                                            log_and_append(f"        ✅ {added_count}個の新商品を追加 (合計: {current_count}個)")
-                                            new_items_loaded = True
-                                            break
+                                    if status.get('newItemsAdded'):
+                                        current_count = status.get('currentCount', 0)
+                                        added_count = current_count - pre_click_count
+                                        log_and_append(f"        ✅ {added_count}個の新商品を追加 (合計: {current_count}個)")
+                                        new_items_loaded = True
+                                        break
                                     
-                                    if not new_items_loaded:
-                                        log_and_append(f"        ⚠️ 新商品の読み込みがタイムアウト")
-                                        # もう一度商品数を確認
-                                        final_count_raw = await tab.evaluate('document.querySelectorAll("h-grid-result-item").length')
-                                        final_count = normalize_nodriver_result(final_count_raw)
-                                        if isinstance(final_count, dict):
-                                            final_count = final_count.get('value', 0)
-                                        if final_count > pre_click_count:
-                                            log_and_append(f"        ✅ 実際には{final_count - pre_click_count}個追加されていました")
-                                    
-                                    # 読み込み完了待機（Ajaxが完了するまで少し長めに待つ）
-                                    await asyncio.sleep(3)
+                                if not new_items_loaded:
+                                    log_and_append(f"        ⚠️ 新商品の読み込みがタイムアウト")
+                                    # もう一度商品数を確認
+                                    final_count_raw = await tab.evaluate('document.querySelectorAll("h-grid-result-item").length')
+                                    final_count = normalize_nodriver_result(final_count_raw)
+                                    if isinstance(final_count, dict):
+                                        final_count = final_count.get('value', 0)
+                                    if final_count > pre_click_count:
+                                        log_and_append(f"        ✅ 実際には{final_count - pre_click_count}個追加されていました")
+                                
+                                # 読み込み完了待機（Ajaxが完了するまで少し長めに待つ）
+                                await asyncio.sleep(3)
                                 
                                 # クリーンアップ
                                 await tab.evaluate('if (window.loadMoreObserver) window.loadMoreObserver.disconnect()')
