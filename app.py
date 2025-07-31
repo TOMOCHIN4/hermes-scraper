@@ -699,7 +699,7 @@ def test_hermes_site_scraping():
                                 const products = [];
                                 
                                 productElements.forEach((element, index) => {
-                                    if (index >= 20) return; // 最大20件
+                                    // 全件処理（制限なし）
                                     
                                     // 商品リンク要素を探す
                                     const linkElement = element.querySelector('a.product-item-name');
@@ -781,7 +781,7 @@ def test_hermes_site_scraping():
                                 log_and_append(f"      抽出商品数: {extracted_count}")
                                 log_and_append(f"      表示商品: {len(items)}件")
                                 
-                                for item in items[:10]:  # 最初の10件を表示
+                                for item in items:  # 全件表示
                                     log_and_append(f"        {item['index']}. {item['title']}")
                                     if item['color']:
                                         log_and_append(f"           カラー: {item['color']}")
@@ -791,6 +791,22 @@ def test_hermes_site_scraping():
                                         log_and_append(f"           価格: {item['price']}")
                                 
                                 extraction_success = True
+                                
+                                # 商品データをJSONファイルとして保存
+                                try:
+                                    products_filename = f"hermes_products_{time.strftime('%Y%m%d_%H%M%S')}.json"
+                                    products_data = {
+                                        "total": total_count,
+                                        "extracted": extracted_count,
+                                        "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
+                                        "products": items
+                                    }
+                                    with open(products_filename, 'w', encoding='utf-8') as f:
+                                        json.dump(products_data, f, ensure_ascii=False, indent=2)
+                                    log_and_append(f"      💾 商品データ保存: {products_filename}")
+                                except Exception as save_error:
+                                    log_and_append(f"      ⚠️ 商品データ保存エラー: {save_error}")
+                                
                                 break
                                 
                             else:
