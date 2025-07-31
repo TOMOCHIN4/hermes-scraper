@@ -474,17 +474,45 @@ def test_hermes_site_scraping():
                         # 完全なHTMLをダウンロード
                         log_and_append(f"      📥 完全なHTMLダウンロード開始")
                         
-                        # ページの完全なHTMLを取得
-                        full_html_raw = await tab.evaluate('() => document.documentElement.outerHTML')
-                        full_html = normalize_nodriver_result(full_html_raw)
+                        # ページの完全なHTMLを取得（SaveAs相当）
+                        # まずページが完全に読み込まれるまで待機
+                        log_and_append("      ⏳ ページ完全読み込み待機中...")
+                        await asyncio.sleep(5)  # 追加待機
                         
-                        # HTMLが辞書形式の場合、値を取得
-                        if isinstance(full_html, dict):
-                            full_html = full_html.get('html', full_html.get('value', str(full_html)))
-                        
-                        # 確実に文字列にする
-                        if not isinstance(full_html, str):
-                            full_html = str(full_html) if full_html else ""
+                        # JavaScriptを使用してレンダリング後のHTMLを取得
+                        try:
+                            # 方法1: XMLSerializerを使用
+                            full_html_raw = await tab.evaluate('''
+                                (() => {
+                                    const serializer = new XMLSerializer();
+                                    return serializer.serializeToString(document);
+                                })()
+                            ''')
+                            full_html = normalize_nodriver_result(full_html_raw)
+                            
+                            # HTMLが辞書形式の場合、値を取得
+                            if isinstance(full_html, dict):
+                                full_html = full_html.get('html', full_html.get('value', str(full_html)))
+                            
+                            # まだ空の場合、方法2を試す
+                            if not full_html or len(str(full_html)) < 1000:
+                                log_and_append("      ⏳ 別方式でHTML取得中...")
+                                full_html_raw2 = await tab.evaluate('''
+                                    document.documentElement.outerHTML
+                                ''')
+                                full_html2 = normalize_nodriver_result(full_html_raw2)
+                                if isinstance(full_html2, dict):
+                                    full_html2 = full_html2.get('value', str(full_html2))
+                                if full_html2 and len(str(full_html2)) > len(str(full_html)):
+                                    full_html = full_html2
+                            
+                            # 確実に文字列にする
+                            if not isinstance(full_html, str):
+                                full_html = str(full_html) if full_html else ""
+                                
+                        except Exception as html_error:
+                            log_and_append(f"      ⚠️ HTML取得エラー: {html_error}")
+                            full_html = ""
                         
                         # HTMLをファイルに保存
                         import os
@@ -509,8 +537,8 @@ def test_hermes_site_scraping():
                                 productElements.forEach((element, index) => {
                                     // 全件処理（制限なし）
                                     
-                                    // 商品リンク要素を探す
-                                    const linkElement = element.querySelector('a.product-item-name');
+                                    // 商品リンク要素を探す（複数のセレクタを試す）
+                                    const linkElement = element.querySelector('a.product-item-name, a[class*="product"], a[href*="/product/"]');
                                     if (!linkElement) return;
                                     
                                     // 商品名
@@ -577,11 +605,11 @@ def test_hermes_site_scraping():
                             # normalize_nodriver_result関数で既に正規化済み
                             normalized_html_result = html_result
                             
-                            if normalized_html_result.get('success'):
-                                product_data = normalized_html_result['data']
+                            if isinstance(normalized_html_result, dict) and normalized_html_result.get('success'):
+                                product_data = normalized_html_result.get('data', {})
                                 total_count = product_data.get('total', 0)
                                 extracted_count = product_data.get('extracted', 0)
-                                items = product_data['items']
+                                items = product_data.get('items', [])
                                 
                                 log_and_append(f"      ✅ 商品データ抽出成功!")
                                 log_and_append(f"      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -657,7 +685,10 @@ def test_hermes_site_scraping():
                                 break
                                 
                             else:
-                                error_msg = normalized_html_result.get('error', 'Unknown error') if isinstance(normalized_html_result, dict) else str(normalized_html_result)
+                                if isinstance(normalized_html_result, dict):
+                                    error_msg = normalized_html_result.get('error', 'Unknown error')
+                                else:
+                                    error_msg = str(normalized_html_result)
                                 log_and_append(f"      ⚠️ HTML抽出失敗: {error_msg}")
                                 
                                 if isinstance(normalized_html_result, dict) and 'debug' in normalized_html_result:
@@ -766,8 +797,8 @@ def test_hermes_site_scraping():
             security_total = len(security_checks) if isinstance(security_checks, dict) else 0
             log_and_append(f"  セキュリティ: {security_ok_count}/{security_total}項目OK")
             
-            # 成功判定（接続成功があれば基本的にOK）
-            hermes_success = successful_connections > 0
+            # 成功判定（商品情報の保存が必須）
+            hermes_success = extraction_success and successful_connections > 0
             
             return hermes_success
             
@@ -807,9 +838,14 @@ def test_hermes_site_scraping():
     
     if hermes_success:
         log_and_append("  ✅ 成功: エルメスサイト特化テスト完了")
+        log_and_append("     商品情報の抽出と保存に成功しました")
         phase6_status = "PASSED"
     else:
-        log_and_append("  ❌ 失敗: エルメスサイトアクセスに問題あり")
+        log_and_append("  ❌ 失敗: 商品情報の保存ができませんでした")
+        if successful_connections > 0:
+            log_and_append("     サイト接続は成功しましたが、商品データを抽出できませんでした")
+        else:
+            log_and_append("     サイト接続自体が失敗しました")
         phase6_status = "FAILED"
     
     log_and_append("")
@@ -819,10 +855,21 @@ def test_hermes_site_scraping():
         log_and_append("")
         log_and_append("🎉 Phase 6合格！Phase 7に進む準備ができました。")
         log_and_append("ユーザーからの承認をお待ちしています。")
+        log_and_append("")
+        log_and_append("📋 合格基準:")
+        log_and_append("  ✅ エルメスサイトへのアクセス成功")
+        log_and_append("  ✅ 商品情報の抽出成功")
+        log_and_append("  ✅ 4種類のファイル保存成功（HTML/JSON/CSV/TXT）")
     else:
         log_and_append("")
         log_and_append("❌ Phase 6で問題が発見されました。")
-        log_and_append("エルメスサイトのアクセス制限またはセキュリティ対策の確認が必要です。")
+        log_and_append("商品情報の保存ができませんでした。")
+        log_and_append("")
+        log_and_append("🔍 問題の可能性:")
+        log_and_append("  - HTMLの取得方法が不適切")
+        log_and_append("  - ページのレンダリング待機時間が不足")
+        log_and_append("  - 商品要素のセレクタが変更された")
+        log_and_append("  - アンチボット対策による制限")
     
     # 保存されたファイルのリストを表示
     log_and_append("")
