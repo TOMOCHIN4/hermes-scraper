@@ -296,73 +296,6 @@ def test_hermes_site_scraping():
                                 log_and_append(f"    📝 表示テキストサンプル:")
                                 log_and_append(f"      '{sample}'")
                             
-                            # hermes-state スクリプトの詳細確認
-                            hermes_state_analysis_raw = await tab.evaluate('''
-                            (function() {
-                                try {
-                                    const script = document.getElementById('hermes-state');
-                                    if (script) {
-                                        const content = script.textContent;
-                                        return {
-                                            exists: true,
-                                            size: content.length,
-                                            type: script.type,
-                                            first_100_chars: content.substring(0, 100),
-                                            last_100_chars: content.length > 100 ? content.substring(content.length - 100) : '',
-                                            looks_like_json: content.trim().startsWith('{') || content.trim().startsWith('[')
-                                        };
-                                    } else {
-                                        // 他のスクリプトタグも確認
-                                        const all_scripts = Array.from(document.scripts);
-                                        const json_scripts = all_scripts.filter(s => 
-                                            s.type === 'application/json' || 
-                                            (s.id && (s.id.includes('state') || s.id.includes('data')))
-                                        );
-                                        
-                                        return {
-                                            exists: false,
-                                            total_scripts: all_scripts.length,
-                                            json_scripts: json_scripts.map(s => ({
-                                                id: s.id || 'no-id', 
-                                                type: s.type || 'no-type', 
-                                                size: s.textContent ? s.textContent.length : 0
-                                            }))
-                                        };
-                                    }
-                                } catch (error) {
-                                    return { error: error.message };
-                                }
-                            })()
-                            ''')
-                            
-                            # nodriverの戻り値を正規化
-                            hermes_state_analysis = normalize_nodriver_result(hermes_state_analysis_raw)
-                            
-                            log_and_append(f"    📜 hermes-state スクリプト分析:")
-                            
-                            # 安全なデータアクセス
-                            if isinstance(hermes_state_analysis, dict):
-                                if safe_get(hermes_state_analysis, 'exists') == True:
-                                    log_and_append(f"      ✅ 存在確認")
-                                    log_and_append(f"      サイズ: {safe_get(hermes_state_analysis, 'size')}文字")
-                                    log_and_append(f"      タイプ: {safe_get(hermes_state_analysis, 'type')}")
-                                    log_and_append(f"      JSON形式: {safe_get(hermes_state_analysis, 'looks_like_json')}")
-                                    log_and_append(f"      開始100文字: '{safe_get(hermes_state_analysis, 'first_100_chars')}'")
-                                    last_chars = safe_get(hermes_state_analysis, 'last_100_chars')
-                                    if last_chars and last_chars != 'N/A':
-                                        log_and_append(f"      終端100文字: '{last_chars}'")
-                                elif safe_get(hermes_state_analysis, 'exists') == False:
-                                    log_and_append(f"      ❌ hermes-state not found")
-                                    log_and_append(f"      総スクリプト数: {safe_get(hermes_state_analysis, 'total_scripts')}")
-                                    json_scripts = safe_get(hermes_state_analysis, 'json_scripts', [])
-                                    log_and_append(f"      JSONスクリプト: {json_scripts}")
-                                else:
-                                    error_msg = safe_get(hermes_state_analysis, 'error')
-                                    if error_msg != 'N/A':
-                                        log_and_append(f"      ⚠️ スクリプト分析エラー: {error_msg}")
-                            else:
-                                log_and_append(f"      ⚠️ 予期しないスクリプト分析データ形式: {type(hermes_state_analysis)}")
-                            
                             # Angular/DOM要素の詳細確認（安全版）
                             try:
                                 dom_analysis_raw = await tab.evaluate('''
@@ -436,7 +369,6 @@ def test_hermes_site_scraping():
                                 "tab": tab,
                                 "extract_products": site.get('extract_products', False),
                                 "analysis": page_analysis,
-                                "hermes_state": hermes_state_analysis,
                                 "dom_analysis": dom_analysis,
                                 "index": i  # インデックスを追加
                             })
