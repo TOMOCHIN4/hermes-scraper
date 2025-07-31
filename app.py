@@ -41,7 +41,7 @@ def test_hermes_site_scraping():
     print("")
     sys.stdout.flush()
     
-    log_and_append("=== Phase 6: エルメスサイト特化テスト (v2025.01.31.7) ===")
+    log_and_append("=== Phase 6: エルメスサイト特化テスト (v2025.01.31.8) ===")
     log_and_append(f"実行時刻: {datetime.now()}")
     log_and_append("")
     
@@ -604,13 +604,20 @@ def test_hermes_site_scraping():
                         '''
                         
                             html_result_raw = await tab.evaluate(html_extraction_script)
-                            html_result = normalize_nodriver_result(html_result_raw)
+                            
+                            # nodriverの戻り値を正規化
+                            if isinstance(html_result_raw, list):
+                                # リスト形式の場合、normalize_nodriver_resultで変換
+                                html_result = normalize_nodriver_result(html_result_raw)
+                            else:
+                                # 既に辞書形式の場合はそのまま使用
+                                html_result = html_result_raw
                             
                         except Exception as extract_error:
                             log_and_append(f"      ❌ DOM解析エラー: {extract_error}")
                             html_result = {'success': False, 'error': f'DOM extraction error: {extract_error}'}
                             
-                        # normalize_nodriver_result関数で既に正規化済み
+                        # 正規化後の結果
                         normalized_html_result = html_result
                         
                         if isinstance(normalized_html_result, dict) and normalized_html_result.get('success'):
@@ -674,6 +681,39 @@ def test_hermes_site_scraping():
                             
                             # 商品データを保存（JSON & CSV & TXT）
                             try:
+                                # safe_get_value関数を定義
+                                def safe_get_value(data, key, default=''):
+                                    """nodriverのネストデータから値を取得"""
+                                    if isinstance(data, dict):
+                                        return data.get(key, default)
+                                    elif isinstance(data, list):
+                                        for item in data:
+                                            if isinstance(item, list) and len(item) == 2 and item[0] == key:
+                                                value_info = item[1]
+                                                if isinstance(value_info, dict) and 'value' in value_info:
+                                                    return value_info['value']
+                                                return value_info
+                                    return default
+                                
+                                # 各商品データから必要なフィールドのみ抽出
+                                cleaned_items = []
+                                for item in items:
+                                    # nodriverのネスト構造に対応
+                                    if isinstance(item, dict) and item.get('type') == 'object' and 'value' in item:
+                                        item_data = item['value']
+                                    else:
+                                        item_data = item
+                                        
+                                    cleaned_item = {
+                                        'index': safe_get_value(item_data, 'index', ''),
+                                        'title': safe_get_value(item_data, 'title', ''),
+                                        'color': safe_get_value(item_data, 'color', ''),
+                                        'price': safe_get_value(item_data, 'price', ''),
+                                        'sku': safe_get_value(item_data, 'sku', ''),
+                                        'url': safe_get_value(item_data, 'url', '')
+                                    }
+                                    cleaned_items.append(cleaned_item)
+                                
                                 # 固定ファイル名（上書き保存）
                                 json_filename = "hermes_products.json"
                                 csv_filename = "hermes_products.csv"
@@ -695,39 +735,6 @@ def test_hermes_site_scraping():
                                     fieldnames = ['index', 'title', 'color', 'price', 'sku', 'url']
                                     writer = csv.DictWriter(f, fieldnames=fieldnames)
                                     writer.writeheader()
-                                    
-                                    # safe_get関数を定義
-                                    def safe_get_value(data, key, default=''):
-                                        """nodriverのネストデータから値を取得"""
-                                        if isinstance(data, dict):
-                                            return data.get(key, default)
-                                        elif isinstance(data, list):
-                                            for item in data:
-                                                if isinstance(item, list) and len(item) == 2 and item[0] == key:
-                                                    value_info = item[1]
-                                                    if isinstance(value_info, dict) and 'value' in value_info:
-                                                        return value_info['value']
-                                                    return value_info
-                                        return default
-                                    
-                                    # 各商品データから必要なフィールドのみ抽出
-                                    cleaned_items = []
-                                    for item in items:
-                                        # nodriverのネスト構造に対応
-                                        if isinstance(item, dict) and item.get('type') == 'object' and 'value' in item:
-                                            item_data = item['value']
-                                        else:
-                                            item_data = item
-                                            
-                                        cleaned_item = {
-                                            'index': safe_get_value(item_data, 'index', ''),
-                                            'title': safe_get_value(item_data, 'title', ''),
-                                            'color': safe_get_value(item_data, 'color', ''),
-                                            'price': safe_get_value(item_data, 'price', ''),
-                                            'sku': safe_get_value(item_data, 'sku', ''),
-                                            'url': safe_get_value(item_data, 'url', '')
-                                        }
-                                        cleaned_items.append(cleaned_item)
                                     
                                     writer.writerows(cleaned_items)
                                 
