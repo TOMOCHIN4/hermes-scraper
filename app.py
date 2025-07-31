@@ -7,6 +7,24 @@ import traceback
 import json
 import time
 
+def normalize_nodriver_result(result):
+    """nodriverが返す特殊なリスト形式を辞書形式に変換"""
+    if isinstance(result, list):
+        try:
+            normalized = {}
+            for item in result:
+                if isinstance(item, list) and len(item) == 2:
+                    key = item[0]
+                    value_info = item[1]
+                    if isinstance(value_info, dict) and 'value' in value_info:
+                        normalized[key] = value_info['value']
+                    else:
+                        normalized[key] = value_info
+            return normalized if normalized else result
+        except Exception:
+            return result
+    return result
+
 def test_hermes_site_scraping():
     """Phase 6: エルメスサイト特化テスト"""
     results = []
@@ -75,7 +93,7 @@ def test_hermes_site_scraping():
             
             hermes_urls = [
                 {
-                    "name": "エルメスバッグ検索ページ（JSON抽出テスト用）",
+                    "name": "エルメスバッグ検索ページ（HTML直接解析テスト）",
                     "url": "https://www.hermes.com/jp/ja/search/?s=%E3%83%90%E3%83%83%E3%82%B0#",
                     "timeout": 45,
                     "extract_products": True
@@ -125,7 +143,10 @@ def test_hermes_site_scraping():
                             log_and_append(f"      要素待機: {selector}")
                             # 要素出現まで最大20秒待機
                             for attempt in range(40):  # 0.5秒 × 40回 = 20秒
-                                element_exists = await tab.evaluate(f'document.querySelector("{selector}") ? true : false')
+                                element_exists_raw = await tab.evaluate(f'document.querySelector("{selector}") ? true : false')
+                                element_exists = normalize_nodriver_result(element_exists_raw)
+                                if isinstance(element_exists, dict):
+                                    element_exists = element_exists.get('exists', element_exists.get('value', False))
                                 if element_exists:
                                     log_and_append(f"      ✅ 要素発見: {selector}")
                                     container_found = True
@@ -161,11 +182,17 @@ def test_hermes_site_scraping():
                         log_and_append(f"    🔍 ページ詳細情報取得開始")
                         
                         # ページタイトル取得
-                        title = await tab.evaluate('document.title')
+                        title_raw = await tab.evaluate('document.title')
+                        title = normalize_nodriver_result(title_raw)
+                        if isinstance(title, dict):
+                            title = title.get('title', title.get('value', str(title_raw)))
                         log_and_append(f"    ページタイトル: '{title}'")
                         
                         # ページURL確認
-                        current_url = await tab.evaluate('window.location.href')
+                        current_url_raw = await tab.evaluate('window.location.href')
+                        current_url = normalize_nodriver_result(current_url_raw)
+                        if isinstance(current_url, dict):
+                            current_url = current_url.get('href', current_url.get('value', str(current_url_raw)))
                         log_and_append(f"    現在URL: {current_url}")
                         
                         # Redirect確認
@@ -176,12 +203,15 @@ def test_hermes_site_scraping():
                             log_and_append(f"      現URL: {current_url}")
                         
                         # 基本的なページ要素確認
-                        body_exists = await tab.evaluate('document.body ? true : false')
+                        body_exists_raw = await tab.evaluate('document.body ? true : false')
+                        body_exists = normalize_nodriver_result(body_exists_raw)
+                        if isinstance(body_exists, dict):
+                            body_exists = body_exists.get('value', body_exists_raw)
                         log_and_append(f"    Body要素: {'存在' if body_exists else '不存在'}")
                         
                         if body_exists:
                             # 【詳細ロギング】ページコンテンツ分析
-                            page_analysis = await tab.evaluate('''
+                            page_analysis_raw = await tab.evaluate('''
                             (function() {
                                 const body = document.body;
                                 const analysis = {
@@ -206,6 +236,9 @@ def test_hermes_site_scraping():
                                 return analysis;
                             })()
                             ''')
+                            
+                            # nodriverの戻り値を正規化
+                            page_analysis = normalize_nodriver_result(page_analysis_raw)
                             
                             # nodriverの戻り値を安全に処理
                             def safe_get(data, key, default='N/A'):
@@ -261,7 +294,7 @@ def test_hermes_site_scraping():
                                 log_and_append(f"      ⚠️ 予期しないデータ形式: {page_analysis}")
                             
                             # hermes-state スクリプトの詳細確認
-                            hermes_state_analysis = await tab.evaluate('''
+                            hermes_state_analysis_raw = await tab.evaluate('''
                             (function() {
                                 try {
                                     const script = document.getElementById('hermes-state');
@@ -299,6 +332,9 @@ def test_hermes_site_scraping():
                             })()
                             ''')
                             
+                            # nodriverの戻り値を正規化
+                            hermes_state_analysis = normalize_nodriver_result(hermes_state_analysis_raw)
+                            
                             log_and_append(f"    📜 hermes-state スクリプト分析:")
                             
                             # 安全なデータアクセス
@@ -326,7 +362,7 @@ def test_hermes_site_scraping():
                             
                             # Angular/DOM要素の詳細確認（安全版）
                             try:
-                                dom_analysis = await tab.evaluate('''
+                                dom_analysis_raw = await tab.evaluate('''
                                 (function() {
                                     try {
                                         const selectors_to_check = [
@@ -358,6 +394,9 @@ def test_hermes_site_scraping():
                                     }
                                 })()
                                 ''')
+                                
+                                # nodriverの戻り値を正規化
+                                dom_analysis = normalize_nodriver_result(dom_analysis_raw)
                                 
                                 log_and_append(f"    🔍 DOM要素詳細分析:")
                                 if isinstance(dom_analysis, dict):
@@ -436,14 +475,23 @@ def test_hermes_site_scraping():
                         log_and_append(f"      📥 完全なHTMLダウンロード開始")
                         
                         # ページの完全なHTMLを取得
-                        full_html = await tab.evaluate('() => document.documentElement.outerHTML')
+                        full_html_raw = await tab.evaluate('() => document.documentElement.outerHTML')
+                        full_html = normalize_nodriver_result(full_html_raw)
+                        
+                        # HTMLが辞書形式の場合、値を取得
+                        if isinstance(full_html, dict):
+                            full_html = full_html.get('html', full_html.get('value', str(full_html)))
+                        
+                        # 確実に文字列にする
+                        if not isinstance(full_html, str):
+                            full_html = str(full_html) if full_html else ""
                         
                         # HTMLをファイルに保存
                         import os
                         html_filename = 'hermes_page.html'
                         with open(html_filename, 'w', encoding='utf-8') as f:
                             f.write(full_html)
-                        log_and_append(f"      ✅ HTMLを {html_filename} に保存 ({len(full_html):,} bytes)")
+                        log_and_append(f"      ✅ HTMLを {html_filename} に保存 ({len(full_html):,} bytes}")
                         
                         # 商品データを抽出するスクリプト
                         html_extraction_script = '''
@@ -523,30 +571,11 @@ def test_hermes_site_scraping():
                         '''
                         
                         try:
-                            html_result = await tab.evaluate(html_extraction_script)
+                            html_result_raw = await tab.evaluate(html_extraction_script)
+                            html_result = normalize_nodriver_result(html_result_raw)
                             
-                            # 結果の正規化（nodriverのリスト形式対応）
-                            if isinstance(html_result, list):
-                                # リスト形式の場合、適切な辞書形式に変換
-                                normalized_html_result = {}
-                                for item in html_result:
-                                    if isinstance(item, list) and len(item) == 2:
-                                        key = item[0]
-                                        value_info = item[1]
-                                        if isinstance(value_info, dict) and 'value' in value_info:
-                                            normalized_html_result[key] = value_info['value']
-                                        else:
-                                            normalized_html_result[key] = value_info
-                                    elif isinstance(item, dict):
-                                        # 既に辞書形式の場合
-                                        normalized_html_result.update(item)
-                            else:
-                                normalized_html_result = html_result
-                            
-                            # 正規化後の結果確認
-                            if not isinstance(normalized_html_result, dict):
-                                log_and_append(f"      ⚠️ データ正規化失敗: type={type(normalized_html_result)}")
-                                normalized_html_result = {}
+                            # normalize_nodriver_result関数で既に正規化済み
+                            normalized_html_result = html_result
                             
                             if normalized_html_result.get('success'):
                                 product_data = normalized_html_result['data']
@@ -645,7 +674,10 @@ def test_hermes_site_scraping():
                                 fallback_selectors = ["h-grid-result-item", ".grid-item", "article"]
                                 for selector in fallback_selectors:
                                     count_script = f"document.querySelectorAll('{selector}').length"
-                                    count = await tab.evaluate(count_script)
+                                    count_raw = await tab.evaluate(count_script)
+                                    count = normalize_nodriver_result(count_raw)
+                                    if isinstance(count, dict):
+                                        count = count.get('count', count.get('value', 0))
                                     log_and_append(f"        セレクタ '{selector}': {count}件")
                                     
                                     if count > 0:
@@ -703,7 +735,8 @@ def test_hermes_site_scraping():
                     })()
                     '''
                     
-                    security_info = await tab.evaluate(security_script)
+                    security_info_raw = await tab.evaluate(security_script)
+                    security_info = normalize_nodriver_result(security_info_raw)
                     
                     # nodriverのデータ形式対応
                     normalized_security = security_info
