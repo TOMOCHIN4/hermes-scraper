@@ -41,7 +41,7 @@ def test_hermes_site_scraping():
     print("")
     sys.stdout.flush()
     
-    log_and_append("=== Phase 6: エルメスサイト特化テスト (v2025.01.31.3) ===")
+    log_and_append("=== Phase 6: エルメスサイト特化テスト (v2025.01.31.4) ===")
     log_and_append(f"実行時刻: {datetime.now()}")
     log_and_append("")
     
@@ -440,7 +440,8 @@ def test_hermes_site_scraping():
                                 "extract_products": site.get('extract_products', False),
                                 "analysis": page_analysis,
                                 "hermes_state": hermes_state_analysis,
-                                "dom_analysis": dom_analysis
+                                "dom_analysis": dom_analysis,
+                                "index": i  # インデックスを追加
                             })
                         
                     except Exception as info_error:
@@ -523,7 +524,8 @@ def test_hermes_site_scraping():
                         
                         # HTMLをファイルに保存
                         import os
-                        html_filename = f'hermes_page_{i}.html'
+                        page_index = page.get('index', 1)  # インデックスを取得
+                        html_filename = f'hermes_page_{page_index}.html'
                         with open(html_filename, 'w', encoding='utf-8') as f:
                             f.write(full_html)
                         log_and_append(f"      ✅ HTMLを {html_filename} に保存 ({len(full_html):,} bytes)")
@@ -752,9 +754,9 @@ def test_hermes_site_scraping():
                             # 商品データを保存（JSON & CSV & TXT）
                             try:
                                 # 固定ファイル名（上書き保存）
-                                json_filename = f"hermes_products_{i}.json"
-                                csv_filename = f"hermes_products_{i}.csv"
-                                txt_filename = f"hermes_products_{i}.txt"
+                                json_filename = f"hermes_products_{page_index}.json"
+                                csv_filename = f"hermes_products_{page_index}.csv"
+                                txt_filename = f"hermes_products_{page_index}.txt"
                                 
                                 # JSON形式で保存
                                 products_data = {
@@ -907,9 +909,9 @@ def test_hermes_site_scraping():
                                             # 商品データを保存（JSON & CSV & TXT）
                                             try:
                                                 # 固定ファイル名（上書き保存）
-                                                json_filename = f"hermes_products_{i}.json"
-                                                csv_filename = f"hermes_products_{i}.csv"
-                                                txt_filename = f"hermes_products_{i}.txt"
+                                                json_filename = f"hermes_products_{page_index}.json"
+                                                csv_filename = f"hermes_products_{page_index}.csv"
+                                                txt_filename = f"hermes_products_{page_index}.txt"
                                                 
                                                 # JSON形式で保存
                                                 products_data = {
