@@ -424,268 +424,11 @@ def test_hermes_site_scraping():
                     try:
                         tab = page['tab']
                         
-                        # エルメス特有の商品データ抽出
-                        log_and_append(f"      エルメス特化: 商品データ抽出を試行")
+                        # HTML直接解析による商品データ抽出
+                        log_and_append(f"      🛍️ HTML直接解析による商品データ抽出")
                         
-                        # hermes-state 分析（参考情報）
-                        log_and_append(f"      📊 hermes-state 分析（参考情報）:")
                         
-                        raw_hermes_data = await tab.evaluate('''
-                        (function() {
-                            try {
-                                const hermesStateScript = document.getElementById('hermes-state');
-                                if (hermesStateScript) {
-                                    const rawText = hermesStateScript.textContent;
-                                    return {
-                                        success: true,
-                                        exists: true,
-                                        size: rawText.length,
-                                        first_500_chars: rawText.substring(0, 500),
-                                        last_200_chars: rawText.substring(Math.max(0, rawText.length - 200)),
-                                        raw_content: rawText  // 完全な生データ
-                                    };
-                                } else {
-                                    return { success: false, error: 'hermes-state script not found' };
-                                }
-                            } catch (error) {
-                                return { success: false, error: error.message };
-                            }
-                        })()
-                        ''')
-                        
-                        # nodriverが返すデータ形式への対応
-                        def extract_raw_content_from_nodriver(data):
-                            """nodriverが返すリスト形式からraw_contentを抽出"""
-                            log_and_append(f"        [DEBUG] nodriverデータ型: {type(data)}")
-                            
-                            # デバッグ用: 生データを保存
-                            try:
-                                import json
-                                debug_filename = f"debug_nodriver_data_{time.strftime('%Y%m%d_%H%M%S')}.json"
-                                with open(debug_filename, 'w', encoding='utf-8') as f:
-                                    json.dump(data, f, ensure_ascii=False, indent=2)
-                                log_and_append(f"        [DEBUG] 生データ保存: {debug_filename}")
-                            except Exception as e:
-                                log_and_append(f"        [DEBUG] 生データ保存エラー: {e}")
-                            
-                            if isinstance(data, dict):
-                                # 通常の辞書形式
-                                return data
-                            elif isinstance(data, list):
-                                # リスト形式 [['key', {'type': '...', 'value': '...'}], ...]
-                                log_and_append(f"        [DEBUG] リスト長: {len(data)}")
-                                result = {}
-                                for item in data:
-                                    if isinstance(item, list) and len(item) == 2:
-                                        key = item[0]
-                                        value_info = item[1]
-                                        if isinstance(value_info, dict) and 'value' in value_info:
-                                            result[key] = value_info['value']
-                                        else:
-                                            result[key] = value_info
-                                        if key == 'raw_content':
-                                            log_and_append(f"        [DEBUG] raw_content長: {len(str(result[key]))}")
-                                return result
-                            else:
-                                log_and_append(f"        [DEBUG] 予期しない型: {data}")
-                                return {}
-                        
-                        # データを正規化
-                        normalized_data = extract_raw_content_from_nodriver(raw_hermes_data)
-                        
-                        if normalized_data.get('success') or 'raw_content' in normalized_data:
-                            log_and_append(f"        ✅ hermes-state発見")
-                            
-                            # サイズと内容の確認
-                            if 'size' in normalized_data:
-                                log_and_append(f"        サイズ: {normalized_data['size']}文字")
-                            if 'first_500_chars' in normalized_data:
-                                log_and_append(f"        開始500文字: '{normalized_data['first_500_chars']}'")
-                            if 'last_200_chars' in normalized_data:
-                                log_and_append(f"        終端200文字: '{normalized_data['last_200_chars']}'")
-                            
-                            # 実際のJSONパース試行
-                            raw_content = normalized_data.get('raw_content', '')
-                            if raw_content and len(raw_content) > 10:
-                                try:
-                                    import json
-                                    actual_json_data = json.loads(raw_content)
-                                    log_and_append(f"        ✅ JSON パース成功")
-                                    log_and_append(f"        JSON型: {type(actual_json_data)}")
-                                    
-                                    # hermes-state JSONを保存
-                                    try:
-                                        hermes_json_filename = f"hermes_state_json_{time.strftime('%Y%m%d_%H%M%S')}.json"
-                                        with open(hermes_json_filename, 'w', encoding='utf-8') as f:
-                                            json.dump(actual_json_data, f, ensure_ascii=False, indent=2)
-                                        log_and_append(f"        💾 hermes-state JSON保存: {hermes_json_filename}")
-                                        log_and_append(f"        📥 ダウンロード可能なファイルが作成されました")
-                                    except Exception as save_error:
-                                        log_and_append(f"        ⚠️ JSON保存エラー: {save_error}")
-                                    
-                                    if isinstance(actual_json_data, dict):
-                                        log_and_append(f"        トップレベルキー: {list(actual_json_data.keys())[:5]}")  # 最初の5キーのみ表示
-                                        
-                                        # 商品データ探索（改善版）
-                                        products_found = False
-                                        product_items = []
-                                        
-                                        # パターン1: 直接productsキー
-                                        if 'products' in actual_json_data:
-                                            products = actual_json_data['products']
-                                            if isinstance(products, dict) and 'items' in products:
-                                                product_items = products['items']
-                                                products_found = True
-                                                log_and_append(f"        🎯 products.items発見（直接）")
-                                        
-                                        # パターン2: 数値キー探索（エルメス特有）- 常に実行してデバッグ
-                                        log_and_append(f"        [DEBUG] 数値キー探索開始...")
-                                        
-                                        # まず's'キーの内容を詳細に調査
-                                        for i, top_key in enumerate(list(actual_json_data.keys())[:5]):
-                                            if not isinstance(actual_json_data[top_key], dict):
-                                                continue
-                                                
-                                            top_value = actual_json_data[top_key]
-                                            log_and_append(f"        [DEBUG] キー{i+1} '{top_key}':")
-                                            
-                                            # 's'キーの詳細確認
-                                            if 's' in top_value and isinstance(top_value['s'], dict):
-                                                s_data = top_value['s']
-                                                s_keys = list(s_data.keys())
-                                                log_and_append(f"          's'キー発見: {len(s_keys)}個のサブキー")
-                                                log_and_append(f"          's'のサブキー（最初の10個）: {s_keys[:10]}")
-                                                
-                                                # 各サブキーの型を確認
-                                                for s_key in s_keys[:5]:
-                                                    s_value = s_data[s_key]
-                                                    if isinstance(s_value, dict):
-                                                        log_and_append(f"            s.{s_key}: 辞書（キー: {list(s_value.keys())[:5]}）")
-                                                    elif isinstance(s_value, list):
-                                                        log_and_append(f"            s.{s_key}: リスト（{len(s_value)}要素）")
-                                                        if len(s_value) > 0 and isinstance(s_value[0], dict):
-                                                            log_and_append(f"              第1要素: {list(s_value[0].keys())[:10]}")
-                                                    else:
-                                                        log_and_append(f"            s.{s_key}: {type(s_value)}")
-                                        
-                                        # 商品データ探索
-                                        if not products_found:
-                                            for top_key in list(actual_json_data.keys())[:10]:
-                                                top_value = actual_json_data[top_key]
-                                                if isinstance(top_value, dict):
-                                                    # 's'キー（search/商品）を探す
-                                                    if 's' in top_value and isinstance(top_value['s'], dict):
-                                                        s_data = top_value['s']
-                                                        
-                                                        # products構造を探す（エルメスの正確な構造）
-                                                        if 'products' in s_data and isinstance(s_data['products'], dict):
-                                                            products = s_data['products']
-                                                            if 'items' in products:
-                                                                product_items = products['items']
-                                                                products_found = True
-                                                                total_count = products.get('total', len(products['items']))
-                                                                log_and_append(f"        🎯 {top_key}.s.products.items発見！")
-                                                                log_and_append(f"        ✅ 総商品数: {total_count}")
-                                                                log_and_append(f"        ✅ 取得商品数: {len(product_items)}")
-                                                                break
-                                                        # 直接itemsがある場合
-                                                        elif 'items' in s_data:
-                                                            product_items = s_data['items']
-                                                            products_found = True
-                                                            log_and_append(f"        🎯 {top_key}.s.items発見")
-                                                            break
-                                                        # resultsキーの場合
-                                                        elif 'results' in s_data:
-                                                            product_items = s_data['results']
-                                                            products_found = True
-                                                            log_and_append(f"        🎯 {top_key}.s.results発見")
-                                                            break
-                                                    
-                                                    # 'b'キーも確認（breadcrumb）
-                                                    if 'b' in top_value and isinstance(top_value['b'], dict):
-                                                        b_data = top_value['b']
-                                                        if 'products' in b_data and isinstance(b_data['products'], dict):
-                                                            products = b_data['products']
-                                                            if 'items' in products:
-                                                                product_items = products['items']
-                                                                products_found = True
-                                                                log_and_append(f"        🎯 {top_key}.b.products.items発見")
-                                                                break
-                                                    
-                                                    # 直接productsを持つ場合
-                                                    elif 'products' in top_value and isinstance(top_value['products'], dict):
-                                                        products = top_value['products']
-                                                        if 'items' in products:
-                                                            product_items = products['items']
-                                                            products_found = True
-                                                            log_and_append(f"        🎯 {top_key}.products.items発見")
-                                                            break
-                                        
-                                        if products_found and isinstance(product_items, list) and len(product_items) > 0:
-                                            log_and_append(f"        ✅ 商品データ構造確認:")
-                                            log_and_append(f"          アイテム数: {len(product_items)}")
-                                            
-                                            first_item = product_items[0]
-                                            if isinstance(first_item, dict):
-                                                log_and_append(f"          第1商品キー: {list(first_item.keys())[:10]}")  # 最初の10キーのみ
-                                                
-                                                # 実際の商品情報サンプル表示
-                                                sample_products = []
-                                                for i, item in enumerate(product_items[:5]):  # 最大5件
-                                                    if isinstance(item, dict):
-                                                        # 様々なキー名に対応
-                                                        product_info = {
-                                                            'title': item.get('title', item.get('name', item.get('displayName', 'N/A'))),
-                                                            'url': item.get('url', item.get('link', item.get('href', 'N/A'))),
-                                                            'price': item.get('price', item.get('priceRange', 'N/A')),
-                                                            'sku': item.get('sku', item.get('id', item.get('code', 'N/A')))
-                                                        }
-                                                        sample_products.append(product_info)
-                                                        log_and_append(f"          商品{i+1}: {product_info['title']}")
-                                                        log_and_append(f"            URL: {product_info['url']}")
-                                                        log_and_append(f"            価格: {product_info['price']}")
-                                                        log_and_append(f"            SKU: {product_info['sku']}")
-                                                
-                                                if sample_products:
-                                                    log_and_append(f"        🎉 商品情報抽出完全成功! {len(sample_products)}件サンプル取得")
-                                                    extraction_success = True
-                                        else:
-                                            log_and_append(f"        ⚠️ 商品データが見つかりません")
-                                            # デバッグ用: データ構造の詳細表示
-                                            for i, (key, value) in enumerate(list(actual_json_data.items())[:3]):
-                                                log_and_append(f"        キー'{key}'の構造: {type(value)}")
-                                                if isinstance(value, dict):
-                                                    log_and_append(f"          サブキー: {list(value.keys())[:5]}")
-                                                    # 's'キーの詳細確認
-                                                    if 's' in value and isinstance(value['s'], dict):
-                                                        s_keys = list(value['s'].keys())
-                                                        log_and_append(f"          's'キーの内容: {s_keys[:10]}")
-                                                        # さらに深い階層を確認
-                                                        for s_key in s_keys[:3]:
-                                                            s_value = value['s'][s_key]
-                                                            if isinstance(s_value, dict):
-                                                                log_and_append(f"            s.{s_key}: {list(s_value.keys())[:5]}")
-                                                            elif isinstance(s_value, list):
-                                                                log_and_append(f"            s.{s_key}: リスト（{len(s_value)}要素）")
-                                                                if len(s_value) > 0 and isinstance(s_value[0], dict):
-                                                                    log_and_append(f"              第1要素のキー: {list(s_value[0].keys())[:10]}")
-                                    else:
-                                        log_and_append(f"        ⚠️ JSONが辞書型ではない: {type(actual_json_data)}")
-                                        
-                                except json.JSONDecodeError as json_error:
-                                    log_and_append(f"        ❌ JSON パースエラー: {json_error}")
-                                except Exception as parse_error:
-                                    log_and_append(f"        ❌ データ処理エラー: {parse_error}")
-                            else:
-                                log_and_append(f"        ❌ hermes-state内容が空または短すぎる")
-                        else:
-                            if isinstance(normalized_data, dict):
-                                error_msg = normalized_data.get('error', 'Unknown error')
-                            else:
-                                error_msg = f"予期しないデータ形式: {type(raw_hermes_data)}"
-                            log_and_append(f"        ❌ hermes-state取得エラー: {error_msg}")
-                        
-                        # Step 2: HTML直接解析による商品データ抽出
+                        # HTML直接解析による商品データ抽出
                         html_extraction_script = '''
                         (function() {
                             try {
@@ -762,13 +505,23 @@ def test_hermes_site_scraping():
                         })()
                         '''
                         
-                        log_and_append(f"      🔄 HTML直接解析による商品データ抽出を試行")
-                        
                         try:
                             html_result = await tab.evaluate(html_extraction_script)
                             
-                            # nodriverのリスト形式データへの対応
-                            normalized_html_result = extract_raw_content_from_nodriver(html_result) if isinstance(html_result, list) else html_result
+                            # 結果の正規化（nodriverのリスト形式対応）
+                            if isinstance(html_result, list):
+                                # リスト形式の場合、適切な辞書形式に変換
+                                normalized_html_result = {}
+                                for item in html_result:
+                                    if isinstance(item, list) and len(item) == 2:
+                                        key = item[0]
+                                        value_info = item[1]
+                                        if isinstance(value_info, dict) and 'value' in value_info:
+                                            normalized_html_result[key] = value_info['value']
+                                        else:
+                                            normalized_html_result[key] = value_info
+                            else:
+                                normalized_html_result = html_result
                             
                             if isinstance(normalized_html_result, dict) and normalized_html_result.get('success'):
                                 product_data = normalized_html_result['data']
@@ -776,36 +529,55 @@ def test_hermes_site_scraping():
                                 extracted_count = product_data.get('extracted', 0)
                                 items = product_data['items']
                                 
-                                log_and_append(f"      ✅ HTML商品データ抽出成功!")
-                                log_and_append(f"      総商品数: {total_count}")
-                                log_and_append(f"      抽出商品数: {extracted_count}")
-                                log_and_append(f"      表示商品: {len(items)}件")
+                                log_and_append(f"      ✅ 商品データ抽出成功!")
+                                log_and_append(f"      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                                log_and_append(f"      総商品数: {total_count}件")
+                                log_and_append(f"      抽出成功: {extracted_count}件")
+                                log_and_append(f"      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                                log_and_append("")
                                 
-                                for item in items:  # 全件表示
-                                    log_and_append(f"        {item['index']}. {item['title']}")
+                                # 商品情報を整形して表示
+                                for item in items:
+                                    title_line = f"      {item['index']:>3}. {item['title']}"
                                     if item['color']:
-                                        log_and_append(f"           カラー: {item['color']}")
-                                    log_and_append(f"           URL: {item['url']}")
-                                    log_and_append(f"           SKU: {item['sku']}")
+                                        title_line += f" ({item['color']})"
+                                    log_and_append(title_line)
+                                    
                                     if item['price'] != 'N/A':
-                                        log_and_append(f"           価格: {item['price']}")
+                                        log_and_append(f"          価格: {item['price']}")
+                                    log_and_append(f"          URL: {item['url']}")
+                                    log_and_append("")  # 商品間の空行
                                 
                                 extraction_success = True
                                 
-                                # 商品データをJSONファイルとして保存
+                                # 商品データを保存（JSON & CSV）
                                 try:
-                                    products_filename = f"hermes_products_{time.strftime('%Y%m%d_%H%M%S')}.json"
+                                    timestamp = time.strftime('%Y%m%d_%H%M%S')
+                                    
+                                    # JSON形式で保存
+                                    json_filename = f"hermes_products_{timestamp}.json"
                                     products_data = {
                                         "total": total_count,
                                         "extracted": extracted_count,
                                         "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
                                         "products": items
                                     }
-                                    with open(products_filename, 'w', encoding='utf-8') as f:
+                                    with open(json_filename, 'w', encoding='utf-8') as f:
                                         json.dump(products_data, f, ensure_ascii=False, indent=2)
-                                    log_and_append(f"      💾 商品データ保存: {products_filename}")
+                                    
+                                    # CSV形式で保存
+                                    csv_filename = f"hermes_products_{timestamp}.csv"
+                                    import csv
+                                    with open(csv_filename, 'w', encoding='utf-8-sig', newline='') as f:
+                                        writer = csv.DictWriter(f, fieldnames=['index', 'title', 'color', 'price', 'sku', 'url'])
+                                        writer.writeheader()
+                                        writer.writerows(items)
+                                    
+                                    log_and_append(f"      💾 データ保存完了:")
+                                    log_and_append(f"         - JSON: {json_filename}")
+                                    log_and_append(f"         - CSV: {csv_filename}")
                                 except Exception as save_error:
-                                    log_and_append(f"      ⚠️ 商品データ保存エラー: {save_error}")
+                                    log_and_append(f"      ⚠️ データ保存エラー: {save_error}")
                                 
                                 break
                                 
@@ -983,13 +755,14 @@ def test_hermes_site_scraping():
     return "\n".join(results)
 
 # ファイルダウンロード用の関数
-def get_json_files():
-    """保存されたJSONファイルのリストを返す"""
+def get_downloadable_files():
+    """保存されたファイルのリストを返す"""
     import glob
-    json_files = glob.glob("*.json")
-    if json_files:
-        return json_files
-    return None
+    files = []
+    # 商品データファイル（JSON & CSV）
+    files.extend(glob.glob("hermes_products_*.json"))
+    files.extend(glob.glob("hermes_products_*.csv"))
+    return files if files else None
 
 # Gradioインターフェース
 with gr.Blocks(title="Phase 6: エルメスサイト特化テスト") as app:
@@ -1012,7 +785,7 @@ with gr.Blocks(title="Phase 6: エルメスサイト特化テスト") as app:
     
     with gr.Row():
         file_output = gr.File(
-            label="JSONファイル",
+            label="ダウンロード可能なファイル（JSON/CSV）",
             file_count="multiple",
             interactive=False
         )
@@ -1020,7 +793,7 @@ with gr.Blocks(title="Phase 6: エルメスサイト特化テスト") as app:
     
     def run_test_and_update_files():
         result = test_hermes_site_scraping()
-        files = get_json_files()
+        files = get_downloadable_files()
         return result, files
     
     test_btn.click(
@@ -1029,7 +802,7 @@ with gr.Blocks(title="Phase 6: エルメスサイト特化テスト") as app:
     )
     
     refresh_btn.click(
-        fn=get_json_files,
+        fn=get_downloadable_files,
         outputs=file_output
     )
     
