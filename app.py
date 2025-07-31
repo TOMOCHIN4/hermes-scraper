@@ -422,11 +422,48 @@ def test_hermes_site_scraping():
                                     initial_count = initial_count.get('value', 0)
                                 log_and_append(f"        初期商品数: {initial_count}個")
                                 
-                                # 総商品数を取得
+                                # 総商品数を取得（改善版）
                                 total_products_raw = await tab.evaluate('''
-                                    const totalElement = document.querySelector('[data-testid="number-current-result"], span.header-title-current-number-result');
-                                    const totalMatch = totalElement ? totalElement.textContent.match(/\\((\\d+)\\)/) : null;
-                                    totalMatch ? parseInt(totalMatch[1]) : 0
+                                    (function() {
+                                        // 複数の方法で総商品数を探す
+                                        
+                                        // 方法1: "168 アイテム" のパターンを探す
+                                        const pageText = document.body.textContent;
+                                        const itemMatch = pageText.match(/(\\d+)\\s*(?:​\\s*)?アイテム/);
+                                        if (itemMatch && parseInt(itemMatch[1]) > 48) {  // 48より大きい数字を総数と判断
+                                            console.log('Total products found:', itemMatch[1]);
+                                            return parseInt(itemMatch[1]);
+                                        }
+                                        
+                                        // 方法2: data-testid属性を使用
+                                        const totalElement = document.querySelector('[data-testid="number-current-result"]');
+                                        if (totalElement) {
+                                            const text = totalElement.textContent;
+                                            const match = text.match(/(\\d+)/);
+                                            if (match) {
+                                                console.log('Total products from data-testid:', match[1]);
+                                                return parseInt(match[1]);
+                                            }
+                                        }
+                                        
+                                        // 方法3: 検索結果のパターン
+                                        const patterns = [
+                                            /検索結果.*?(\\d+)/,
+                                            /\\((\\d+)\\)/,
+                                            /(\\d+)\\s*items?/i
+                                        ];
+                                        
+                                        for (let pattern of patterns) {
+                                            const match = pageText.match(pattern);
+                                            if (match && parseInt(match[1]) > 0) {
+                                                console.log('Total products from pattern:', match[1]);
+                                                return parseInt(match[1]);
+                                            }
+                                        }
+                                        
+                                        console.log('Could not find total products count');
+                                        return 0;
+                                    })()
                                 ''')
                                 total_products = normalize_nodriver_result(total_products_raw)
                                 if isinstance(total_products, dict):
@@ -642,7 +679,7 @@ def test_hermes_site_scraping():
                             hermes_success = True
                             
                             # Phase 6.0はここで終了（DOM解析は行わない）
-                            break
+                            # breakを削除してPhase 6.5も実行するように変更
                             
                     except Exception as extract_error:
                         log_and_append(f"    ❌ 抽出テストエラー: {extract_error}")
