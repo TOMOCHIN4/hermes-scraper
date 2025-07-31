@@ -689,126 +689,126 @@ def test_hermes_site_scraping():
                             
                             # product_dataがリストの場合の処理
                             if isinstance(product_data, list):
-                                    log_and_append(f"      ⚠️ product_dataがリスト形式で返されました: {type(product_data)}")
-                                    # リストから辞書形式のデータを探す
-                                    for item in product_data:
-                                        if isinstance(item, dict) and ('total' in item or 'items' in item):
-                                            product_data = item
-                                            break
-                                    else:
-                                        # 適切なデータが見つからない場合
-                                        product_data = {}
-                                
-                                # 辞書として安全にアクセス
-                                if isinstance(product_data, dict):
-                                    total_count = product_data.get('total', 0)
-                                    extracted_count = product_data.get('extracted', 0)
-                                    items = product_data.get('items', [])
+                                log_and_append(f"      ⚠️ product_dataがリスト形式で返されました: {type(product_data)}")
+                                # リストから辞書形式のデータを探す
+                                for item in product_data:
+                                    if isinstance(item, dict) and ('total' in item or 'items' in item):
+                                        product_data = item
+                                        break
                                 else:
-                                    log_and_append(f"      ⚠️ product_dataの形式が不正: {type(product_data)}")
-                                    total_count = 0
-                                    extracted_count = 0
-                                    items = []
-                                
-                                # 商品数の検証
-                                if extracted_count > 0 and len(items) > 0:
-                                    log_and_append(f"      ✅ 商品データ抽出成功!")
-                                    log_and_append(f"      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                                    log_and_append(f"      総商品数: {total_count}件")
-                                    log_and_append(f"      抽出成功: {extracted_count}件")
-                                    log_and_append(f"      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                                    log_and_append("")
-                                else:
-                                    log_and_append(f"      ⚠️ 商品データ抽出失敗: 商品数が0件")
-                                    log_and_append(f"      総商品数: {total_count}件")
-                                    log_and_append(f"      抽出成功: {extracted_count}件")
-                                    log_and_append(f"      アイテム数: {len(items)}件")
-                                    log_and_append("")
-                                
-                                # 商品がある場合のみ表示と成功判定
-                                if len(items) > 0:
-                                    # 商品情報を整形して表示
-                                    for item in items:
-                                        title_line = f"      {item['index']:>3}. {item['title']}"
-                                        if item.get('color'):
-                                            title_line += f" ({item['color']})"
-                                        log_and_append(title_line)
-                                        
-                                        if item.get('price') and item['price'] != 'N/A':
-                                            log_and_append(f"          価格: {item['price']}")
-                                        log_and_append(f"          URL: {item['url']}")
-                                        log_and_append("")  # 商品間の空行
-                                    
-                                    extraction_success = True
-                                else:
-                                    extraction_success = False
-                                
-                                # 商品データを保存（JSON & CSV & TXT）
-                                try:
-                                    # 固定ファイル名（上書き保存）
-                                    json_filename = "hermes_products.json"
-                                    csv_filename = "hermes_products.csv"
-                                    txt_filename = "hermes_products.txt"
-                                    
-                                    # JSON形式で保存
-                                    products_data = {
-                                        "total": total_count,
-                                        "extracted": extracted_count,
-                                        "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
-                                        "products": items
-                                    }
-                                    with open(json_filename, 'w', encoding='utf-8') as f:
-                                        json.dump(products_data, f, ensure_ascii=False, indent=2)
-                                    
-                                    # CSV形式で保存
-                                    import csv
-                                    with open(csv_filename, 'w', encoding='utf-8-sig', newline='') as f:
-                                        writer = csv.DictWriter(f, fieldnames=['index', 'title', 'color', 'price', 'sku', 'url'])
-                                        writer.writeheader()
-                                        writer.writerows(items)
-                                    
-                                    # テキスト形式で保存（商品名、URL、総数）
-                                    with open(txt_filename, 'w', encoding='utf-8') as f:
-                                        f.write(f"エルメス商品情報\n")
-                                        f.write(f"抽出日時: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-                                        f.write(f"総商品数: {total_count}件\n")
-                                        f.write(f"抽出成功: {extracted_count}件\n")
-                                        f.write("=" * 80 + "\n\n")
-                                        
-                                        for item in items:
-                                            f.write(f"商品 {item['index']}/{extracted_count}\n")
-                                            f.write(f"商品名: {item['title']}\n")
-                                            if item['color']:
-                                                f.write(f"カラー: {item['color']}\n")
-                                            f.write(f"価格: {item['price']}\n")
-                                            f.write(f"URL: {item['url']}\n")
-                                            f.write(f"SKU: {item['sku']}\n")
-                                            f.write("-" * 40 + "\n\n")
-                                    
-                                    log_and_append(f"      💾 データ保存完了:")
-                                    log_and_append(f"         - HTML: hermes_page.html ({len(full_html):,} bytes)")
-                                    log_and_append(f"         - JSON: {json_filename}")
-                                    log_and_append(f"         - CSV: {csv_filename}")
-                                    log_and_append(f"         - TXT: {txt_filename}")
-                                except Exception as save_error:
-                                    log_and_append(f"      ⚠️ データ保存エラー: {save_error}")
-                                
-                                break
-                                
+                                    # 適切なデータが見つからない場合
+                                    product_data = {}
+                            
+                            # 辞書として安全にアクセス
+                            if isinstance(product_data, dict):
+                                total_count = product_data.get('total', 0)
+                                extracted_count = product_data.get('extracted', 0)
+                                items = product_data.get('items', [])
                             else:
-                                if isinstance(normalized_html_result, dict):
-                                    error_msg = normalized_html_result.get('error', 'Unknown error')
-                                else:
-                                    error_msg = str(normalized_html_result)
-                                log_and_append(f"      ⚠️ HTML抽出失敗: {error_msg}")
+                                log_and_append(f"      ⚠️ product_dataの形式が不正: {type(product_data)}")
+                                total_count = 0
+                                extracted_count = 0
+                                items = []
+                            
+                            # 商品数の検証
+                            if extracted_count > 0 and len(items) > 0:
+                                log_and_append(f"      ✅ 商品データ抽出成功!")
+                                log_and_append(f"      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                                log_and_append(f"      総商品数: {total_count}件")
+                                log_and_append(f"      抽出成功: {extracted_count}件")
+                                log_and_append(f"      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                                log_and_append("")
+                            else:
+                                log_and_append(f"      ⚠️ 商品データ抽出失敗: 商品数が0件")
+                                log_and_append(f"      総商品数: {total_count}件")
+                                log_and_append(f"      抽出成功: {extracted_count}件")
+                                log_and_append(f"      アイテム数: {len(items)}件")
+                                log_and_append("")
+                            
+                            # 商品がある場合のみ表示と成功判定
+                            if len(items) > 0:
+                                # 商品情報を整形して表示
+                                for item in items:
+                                    title_line = f"      {item['index']:>3}. {item['title']}"
+                                    if item.get('color'):
+                                        title_line += f" ({item['color']})"
+                                    log_and_append(title_line)
+                                    
+                                    if item.get('price') and item['price'] != 'N/A':
+                                        log_and_append(f"          価格: {item['price']}")
+                                    log_and_append(f"          URL: {item['url']}")
+                                    log_and_append("")  # 商品間の空行
                                 
-                                if isinstance(normalized_html_result, dict) and 'debug' in normalized_html_result:
-                                    debug_info = normalized_html_result['debug']
-                                    log_and_append(f"      デバッグ情報:")
-                                    log_and_append(f"        総数要素: {debug_info.get('totalElement', False)}")
-                                    log_and_append(f"        商品要素数: {debug_info.get('productElements', 0)}")
-                                    if 'firstElementHTML' in debug_info:
-                                        log_and_append(f"        最初の要素: {debug_info['firstElementHTML'][:100]}...")
+                                extraction_success = True
+                            else:
+                                extraction_success = False
+                            
+                            # 商品データを保存（JSON & CSV & TXT）
+                            try:
+                                # 固定ファイル名（上書き保存）
+                                json_filename = "hermes_products.json"
+                                csv_filename = "hermes_products.csv"
+                                txt_filename = "hermes_products.txt"
+                                
+                                # JSON形式で保存
+                                products_data = {
+                                    "total": total_count,
+                                    "extracted": extracted_count,
+                                    "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
+                                    "products": items
+                                }
+                                with open(json_filename, 'w', encoding='utf-8') as f:
+                                    json.dump(products_data, f, ensure_ascii=False, indent=2)
+                                
+                                # CSV形式で保存
+                                import csv
+                                with open(csv_filename, 'w', encoding='utf-8-sig', newline='') as f:
+                                    writer = csv.DictWriter(f, fieldnames=['index', 'title', 'color', 'price', 'sku', 'url'])
+                                    writer.writeheader()
+                                    writer.writerows(items)
+                                
+                                # テキスト形式で保存（商品名、URL、総数）
+                                with open(txt_filename, 'w', encoding='utf-8') as f:
+                                    f.write(f"エルメス商品情報\n")
+                                    f.write(f"抽出日時: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                                    f.write(f"総商品数: {total_count}件\n")
+                                    f.write(f"抽出成功: {extracted_count}件\n")
+                                    f.write("=" * 80 + "\n\n")
+                                    
+                                    for item in items:
+                                        f.write(f"商品 {item['index']}/{extracted_count}\n")
+                                        f.write(f"商品名: {item['title']}\n")
+                                        if item['color']:
+                                            f.write(f"カラー: {item['color']}\n")
+                                        f.write(f"価格: {item['price']}\n")
+                                        f.write(f"URL: {item['url']}\n")
+                                        f.write(f"SKU: {item['sku']}\n")
+                                        f.write("-" * 40 + "\n\n")
+                                
+                                log_and_append(f"      💾 データ保存完了:")
+                                log_and_append(f"         - HTML: hermes_page.html ({len(full_html):,} bytes)")
+                                log_and_append(f"         - JSON: {json_filename}")
+                                log_and_append(f"         - CSV: {csv_filename}")
+                                log_and_append(f"         - TXT: {txt_filename}")
+                            except Exception as save_error:
+                                log_and_append(f"      ⚠️ データ保存エラー: {save_error}")
+                            
+                            break
+                            
+                        else:
+                            if isinstance(normalized_html_result, dict):
+                                error_msg = normalized_html_result.get('error', 'Unknown error')
+                            else:
+                                error_msg = str(normalized_html_result)
+                            log_and_append(f"      ⚠️ HTML抽出失敗: {error_msg}")
+                            
+                            if isinstance(normalized_html_result, dict) and 'debug' in normalized_html_result:
+                                debug_info = normalized_html_result['debug']
+                                log_and_append(f"      デバッグ情報:")
+                                log_and_append(f"        総数要素: {debug_info.get('totalElement', False)}")
+                                log_and_append(f"        商品要素数: {debug_info.get('productElements', 0)}")
+                                if 'firstElementHTML' in debug_info:
+                                    log_and_append(f"        最初の要素: {debug_info['firstElementHTML'][:100]}...")
                                 
                                 # フォールバック: 標準セレクタも試行
                                 log_and_append(f"      フォールバック: 標準セレクタを試行")
@@ -826,11 +826,6 @@ def test_hermes_site_scraping():
                                         log_and_append(f"      ✅ フォールバック成功: {selector}で{count}件発見")
                                         extraction_success = True
                                         break
-                        
-                        except Exception as html_error:
-                            log_and_append(f"      ❌ HTML抽出エラー: {type(html_error).__name__}: {html_error}")
-                            import traceback
-                            log_and_append(f"      スタックトレース: {traceback.format_exc()}")
                         
                         if extraction_success:
                             break
