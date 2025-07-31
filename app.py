@@ -432,11 +432,20 @@ def test_hermes_site_scraping():
                     try:
                         tab = page['tab']
                         
-                        # HTML直接解析による商品データ抽出
-                        log_and_append(f"      🛍️ HTML直接解析による商品データ抽出")
+                        # 完全なHTMLをダウンロード
+                        log_and_append(f"      📥 完全なHTMLダウンロード開始")
                         
+                        # ページの完全なHTMLを取得
+                        full_html = await tab.evaluate('() => document.documentElement.outerHTML')
                         
-                        # HTML直接解析による商品データ抽出
+                        # HTMLをファイルに保存
+                        import os
+                        html_filename = 'hermes_page.html'
+                        with open(html_filename, 'w', encoding='utf-8') as f:
+                            f.write(full_html)
+                        log_and_append(f"      ✅ HTMLを {html_filename} に保存 ({len(full_html):,} bytes)")
+                        
+                        # 商品データを抽出するスクリプト
                         html_extraction_script = '''
                         (function() {
                             try {
@@ -566,12 +575,14 @@ def test_hermes_site_scraping():
                                 
                                 extraction_success = True
                                 
-                                # 商品データを保存（JSON & CSV）
+                                # 商品データを保存（JSON & CSV & TXT）
                                 try:
-                                    timestamp = time.strftime('%Y%m%d_%H%M%S')
+                                    # 固定ファイル名（上書き保存）
+                                    json_filename = "hermes_products.json"
+                                    csv_filename = "hermes_products.csv"
+                                    txt_filename = "hermes_products.txt"
                                     
                                     # JSON形式で保存
-                                    json_filename = f"hermes_products_{timestamp}.json"
                                     products_data = {
                                         "total": total_count,
                                         "extracted": extracted_count,
@@ -582,16 +593,35 @@ def test_hermes_site_scraping():
                                         json.dump(products_data, f, ensure_ascii=False, indent=2)
                                     
                                     # CSV形式で保存
-                                    csv_filename = f"hermes_products_{timestamp}.csv"
                                     import csv
                                     with open(csv_filename, 'w', encoding='utf-8-sig', newline='') as f:
                                         writer = csv.DictWriter(f, fieldnames=['index', 'title', 'color', 'price', 'sku', 'url'])
                                         writer.writeheader()
                                         writer.writerows(items)
                                     
+                                    # テキスト形式で保存（商品名、URL、総数）
+                                    with open(txt_filename, 'w', encoding='utf-8') as f:
+                                        f.write(f"エルメス商品情報\n")
+                                        f.write(f"抽出日時: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                                        f.write(f"総商品数: {total_count}件\n")
+                                        f.write(f"抽出成功: {extracted_count}件\n")
+                                        f.write("=" * 80 + "\n\n")
+                                        
+                                        for item in items:
+                                            f.write(f"商品 {item['index']}/{extracted_count}\n")
+                                            f.write(f"商品名: {item['title']}\n")
+                                            if item['color']:
+                                                f.write(f"カラー: {item['color']}\n")
+                                            f.write(f"価格: {item['price']}\n")
+                                            f.write(f"URL: {item['url']}\n")
+                                            f.write(f"SKU: {item['sku']}\n")
+                                            f.write("-" * 40 + "\n\n")
+                                    
                                     log_and_append(f"      💾 データ保存完了:")
+                                    log_and_append(f"         - HTML: hermes_page.html ({len(full_html):,} bytes)")
                                     log_and_append(f"         - JSON: {json_filename}")
                                     log_and_append(f"         - CSV: {csv_filename}")
+                                    log_and_append(f"         - TXT: {txt_filename}")
                                 except Exception as save_error:
                                     log_and_append(f"      ⚠️ データ保存エラー: {save_error}")
                                 
@@ -763,10 +793,24 @@ def test_hermes_site_scraping():
     
     # 保存されたファイルのリストを表示
     log_and_append("")
-    log_and_append("📁 デバッグ用ファイル:")
+    log_and_append("📁 出力ファイル:")
     import glob
-    for json_file in glob.glob("*.json"):
-        log_and_append(f"  - {json_file}")
+    import os
+    
+    # 各種ファイルの存在確認
+    files_to_check = [
+        ("hermes_page.html", "完全なHTMLファイル"),
+        ("hermes_products.json", "JSON形式の商品データ"),
+        ("hermes_products.csv", "CSV形式の商品データ"),
+        ("hermes_products.txt", "テキスト形式の商品データ")
+    ]
+    
+    for filename, description in files_to_check:
+        if os.path.exists(filename):
+            size = os.path.getsize(filename)
+            log_and_append(f"  ✅ {filename} ({size:,} bytes) - {description}")
+        else:
+            log_and_append(f"  ❌ {filename} - 未生成")
     
     return "\n".join(results)
 
