@@ -824,7 +824,120 @@ def test_hermes_site_scraping():
                                     
                                     if count > 0:
                                         log_and_append(f"      ✅ フォールバック成功: {selector}で{count}件発見")
-                                        extraction_success = True
+                                        
+                                        # フォールバックで商品を発見したら、実際にデータを抽出
+                                        log_and_append(f"      📥 フォールバック商品データ抽出開始...")
+                                        fallback_script = f'''
+                                        (function() {{
+                                            const elements = document.querySelectorAll('{selector}');
+                                            const products = [];
+                                            
+                                            elements.forEach((element, index) => {{
+                                                // 商品リンクを探す
+                                                const linkElement = element.querySelector('a.product-item-name, a[class*="product"], a[href*="/product/"]');
+                                                if (!linkElement) return;
+                                                
+                                                // 商品名
+                                                const titleElement = linkElement.querySelector('.product-title');
+                                                const title = titleElement ? titleElement.textContent.trim() : 'N/A';
+                                                
+                                                // URL
+                                                const url = linkElement.href || linkElement.getAttribute('href') || 'N/A';
+                                                
+                                                // SKU
+                                                const sku = linkElement.id ? linkElement.id.replace('product-item-meta-link-', '') : 'N/A';
+                                                
+                                                // 価格
+                                                const priceElement = element.querySelector('.price, [class*="price"]');
+                                                const price = priceElement ? priceElement.textContent.trim() : 'N/A';
+                                                
+                                                // カラー
+                                                const colorElement = element.querySelector('.product-item-color');
+                                                const color = colorElement ? colorElement.textContent.trim() : '';
+                                                
+                                                products.push({{
+                                                    title: title,
+                                                    url: url,
+                                                    sku: sku,
+                                                    price: price,
+                                                    color: color,
+                                                    index: index + 1
+                                                }});
+                                            }});
+                                            
+                                            return {{
+                                                total: elements.length,
+                                                extracted: products.length,
+                                                items: products
+                                            }};
+                                        }})()
+                                        '''
+                                        
+                                        fallback_result_raw = await tab.evaluate(fallback_script)
+                                        fallback_result = normalize_nodriver_result(fallback_result_raw)
+                                        
+                                        if isinstance(fallback_result, dict) and fallback_result.get('extracted', 0) > 0:
+                                            total_count = fallback_result.get('total', 0)
+                                            extracted_count = fallback_result.get('extracted', 0)
+                                            items = fallback_result.get('items', [])
+                                            
+                                            log_and_append(f"      ✅ フォールバック抽出成功: {extracted_count}/{total_count}件")
+                                            
+                                            # 商品データを保存（JSON & CSV & TXT）
+                                            try:
+                                                # 固定ファイル名（上書き保存）
+                                                json_filename = "hermes_products.json"
+                                                csv_filename = "hermes_products.csv"
+                                                txt_filename = "hermes_products.txt"
+                                                
+                                                # JSON形式で保存
+                                                products_data = {
+                                                    "total": total_count,
+                                                    "extracted": extracted_count,
+                                                    "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
+                                                    "products": items
+                                                }
+                                                with open(json_filename, 'w', encoding='utf-8') as f:
+                                                    json.dump(products_data, f, ensure_ascii=False, indent=2)
+                                                
+                                                # CSV形式で保存
+                                                import csv
+                                                with open(csv_filename, 'w', encoding='utf-8-sig', newline='') as f:
+                                                    writer = csv.DictWriter(f, fieldnames=['index', 'title', 'color', 'price', 'sku', 'url'])
+                                                    writer.writeheader()
+                                                    writer.writerows(items)
+                                                
+                                                # テキスト形式で保存（商品名、URL、総数）
+                                                with open(txt_filename, 'w', encoding='utf-8') as f:
+                                                    f.write(f"エルメス商品情報\n")
+                                                    f.write(f"抽出日時: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                                                    f.write(f"総商品数: {total_count}件\n")
+                                                    f.write(f"抽出成功: {extracted_count}件\n")
+                                                    f.write("=" * 80 + "\n\n")
+                                                    
+                                                    for item in items:
+                                                        f.write(f"商品 {item['index']}/{extracted_count}\n")
+                                                        f.write(f"商品名: {item['title']}\n")
+                                                        if item['color']:
+                                                            f.write(f"カラー: {item['color']}\n")
+                                                        f.write(f"価格: {item['price']}\n")
+                                                        f.write(f"URL: {item['url']}\n")
+                                                        f.write(f"SKU: {item['sku']}\n")
+                                                        f.write("-" * 40 + "\n\n")
+                                                
+                                                log_and_append(f"      💾 フォールバックデータ保存完了:")
+                                                log_and_append(f"         - JSON: {json_filename}")
+                                                log_and_append(f"         - CSV: {csv_filename}")
+                                                log_and_append(f"         - TXT: {txt_filename}")
+                                                
+                                                extraction_success = True
+                                            except Exception as save_error:
+                                                log_and_append(f"      ⚠️ フォールバックデータ保存エラー: {save_error}")
+                                                extraction_success = False
+                                        else:
+                                            log_and_append(f"      ❌ フォールバック抽出失敗")
+                                            extraction_success = False
+                                        
                                         break
                         
                         if extraction_success:
