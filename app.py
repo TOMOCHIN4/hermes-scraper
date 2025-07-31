@@ -41,7 +41,7 @@ def test_hermes_site_scraping():
     print("")
     sys.stdout.flush()
     
-    log_and_append("=== Phase 6: エルメスサイト特化テスト ===")
+    log_and_append("=== Phase 6: エルメスサイト特化テスト (v2025.01.31) ===")
     log_and_append(f"実行時刻: {datetime.now()}")
     log_and_append("")
     
