@@ -608,9 +608,29 @@ def test_hermes_site_scraping():
                             
                             if isinstance(normalized_html_result, dict) and normalized_html_result.get('success'):
                                 product_data = normalized_html_result.get('data', {})
-                                total_count = product_data.get('total', 0)
-                                extracted_count = product_data.get('extracted', 0)
-                                items = product_data.get('items', [])
+                                
+                                # product_dataがリストの場合の処理
+                                if isinstance(product_data, list):
+                                    log_and_append(f"      ⚠️ product_dataがリスト形式で返されました: {type(product_data)}")
+                                    # リストから辞書形式のデータを探す
+                                    for item in product_data:
+                                        if isinstance(item, dict) and ('total' in item or 'items' in item):
+                                            product_data = item
+                                            break
+                                    else:
+                                        # 適切なデータが見つからない場合
+                                        product_data = {}
+                                
+                                # 辞書として安全にアクセス
+                                if isinstance(product_data, dict):
+                                    total_count = product_data.get('total', 0)
+                                    extracted_count = product_data.get('extracted', 0)
+                                    items = product_data.get('items', [])
+                                else:
+                                    log_and_append(f"      ⚠️ product_dataの形式が不正: {type(product_data)}")
+                                    total_count = 0
+                                    extracted_count = 0
+                                    items = []
                                 
                                 log_and_append(f"      ✅ 商品データ抽出成功!")
                                 log_and_append(f"      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
