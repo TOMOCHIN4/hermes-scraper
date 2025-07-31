@@ -408,13 +408,179 @@ def test_hermes_site_scraping():
                     try:
                         tab = page['tab']
                         
-                        # 完全なHTMLをダウンロード
-                        log_and_append(f"      📥 完全なHTMLダウンロード開始")
+                        # 完全なHTMLをダウンロード（Load Moreボタン対応版）
+                        log_and_append(f"      📥 完全なHTMLダウンロード開始（全商品読み込み版）")
+                        
+                        # Load Moreボタンで全商品を読み込む関数
+                        async def load_all_products_with_monitoring(tab, max_clicks=20):
+                            """MutationObserverと商品数カウントを使用して全商品を読み込む"""
+                            log_and_append("      🔄 Load Moreボタンで全商品読み込み開始")
+                            
+                            total_clicks = 0
+                            initial_count = 0
+                            
+                            try:
+                                # 初期商品数を取得
+                                initial_count_raw = await tab.evaluate('document.querySelectorAll("h-grid-result-item").length')
+                                initial_count = normalize_nodriver_result(initial_count_raw)
+                                if isinstance(initial_count, dict):
+                                    initial_count = initial_count.get('value', 0)
+                                log_and_append(f"        初期商品数: {initial_count}個")
+                                
+                                # 総商品数を取得
+                                total_products_raw = await tab.evaluate('''
+                                    const totalElement = document.querySelector('[data-testid="number-current-result"], span.header-title-current-number-result');
+                                    const totalMatch = totalElement ? totalElement.textContent.match(/\\((\\d+)\\)/) : null;
+                                    totalMatch ? parseInt(totalMatch[1]) : 0
+                                ''')
+                                total_products = normalize_nodriver_result(total_products_raw)
+                                if isinstance(total_products, dict):
+                                    total_products = total_products.get('value', 0)
+                                log_and_append(f"        総商品数: {total_products}個")
+                                
+                                # 既に全商品が表示されている場合
+                                if initial_count >= total_products and total_products > 0:
+                                    log_and_append(f"        ✅ 既に全商品が表示されています")
+                                    return True
+                                
+                                while total_clicks < max_clicks:
+                                    # Load Moreボタンの状態を確認
+                                    button_state_raw = await tab.evaluate('''
+                                        (function() {
+                                            const btn = document.querySelector('button[data-testid="Load more items"]');
+                                            return {
+                                                exists: !!btn,
+                                                visible: btn ? btn.offsetParent !== null : false,
+                                                disabled: btn ? (btn.disabled || btn.getAttribute('aria-disabled') === 'true') : true,
+                                                text: btn ? btn.textContent.trim() : ''
+                                            };
+                                        })()
+                                    ''')
+                                    button_state = normalize_nodriver_result(button_state_raw)
+                                    
+                                    # ボタンが存在しない、見えない、または無効な場合は終了
+                                    if not button_state.get('exists') or not button_state.get('visible') or button_state.get('disabled'):
+                                        log_and_append(f"        Load Moreボタンが利用不可: {button_state}")
+                                        break
+                                    
+                                    # クリック前の商品数を記録
+                                    pre_click_count_raw = await tab.evaluate('document.querySelectorAll("h-grid-result-item").length')
+                                    pre_click_count = normalize_nodriver_result(pre_click_count_raw)
+                                    if isinstance(pre_click_count, dict):
+                                        pre_click_count = pre_click_count.get('value', 0)
+                                    
+                                    # MutationObserverを設定
+                                    await tab.evaluate('''
+                                        window.loadMoreStatus = {
+                                            newItemsAdded: false,
+                                            initialCount: document.querySelectorAll('h-grid-result-item').length,
+                                            currentCount: document.querySelectorAll('h-grid-result-item').length
+                                        };
+                                        
+                                        if (window.loadMoreObserver) {
+                                            window.loadMoreObserver.disconnect();
+                                        }
+                                        
+                                        window.loadMoreObserver = new MutationObserver((mutations) => {
+                                            const currentItems = document.querySelectorAll('h-grid-result-item');
+                                            window.loadMoreStatus.currentCount = currentItems.length;
+                                            if (currentItems.length > window.loadMoreStatus.initialCount) {
+                                                window.loadMoreStatus.newItemsAdded = true;
+                                            }
+                                        });
+                                        
+                                        const container = document.querySelector('h-grid-results') || document.body;
+                                        window.loadMoreObserver.observe(container, { childList: true, subtree: true });
+                                    ''')
+                                    
+                                    # スクロールしてボタンを表示
+                                    await tab.evaluate('window.scrollTo(0, document.body.scrollHeight - 500)')
+                                    await asyncio.sleep(1.5)  # 人間らしい待機
+                                    
+                                    # ボタンをクリック
+                                    click_result_raw = await tab.evaluate('''
+                                        const btn = document.querySelector('button[data-testid="Load more items"]');
+                                        if (btn && !btn.disabled) {
+                                            btn.click();
+                                            true;
+                                        } else {
+                                            false;
+                                        }
+                                    ''')
+                                    click_result = normalize_nodriver_result(click_result_raw)
+                                    if isinstance(click_result, dict):
+                                        click_result = click_result.get('value', False)
+                                    
+                                    if not click_result:
+                                        log_and_append(f"        ❌ ボタンクリック失敗")
+                                        break
+                                    
+                                    total_clicks += 1
+                                    log_and_append(f"        クリック #{total_clicks}: 新商品読み込み中...")
+                                    
+                                    # 新商品の読み込みを待つ（最大10秒）
+                                    new_items_loaded = False
+                                    for wait_attempt in range(20):  # 0.5秒 × 20 = 10秒
+                                        await asyncio.sleep(0.5)
+                                        
+                                        status_raw = await tab.evaluate('window.loadMoreStatus')
+                                        status = normalize_nodriver_result(status_raw)
+                                        
+                                        if status.get('newItemsAdded'):
+                                            current_count = status.get('currentCount', 0)
+                                            added_count = current_count - pre_click_count
+                                            log_and_append(f"        ✅ {added_count}個の新商品を追加 (合計: {current_count}個)")
+                                            new_items_loaded = True
+                                            break
+                                    
+                                    if not new_items_loaded:
+                                        log_and_append(f"        ⚠️ 新商品の読み込みがタイムアウト")
+                                        # もう一度商品数を確認
+                                        final_count_raw = await tab.evaluate('document.querySelectorAll("h-grid-result-item").length')
+                                        final_count = normalize_nodriver_result(final_count_raw)
+                                        if isinstance(final_count, dict):
+                                            final_count = final_count.get('value', 0)
+                                        if final_count > pre_click_count:
+                                            log_and_append(f"        ✅ 実際には{final_count - pre_click_count}個追加されていました")
+                                        else:
+                                            break
+                                    
+                                    # レート制限対策の待機
+                                    await asyncio.sleep(2.5)
+                                    
+                                    # 全商品読み込み完了チェック
+                                    current_total_raw = await tab.evaluate('document.querySelectorAll("h-grid-result-item").length')
+                                    current_total = normalize_nodriver_result(current_total_raw)
+                                    if isinstance(current_total, dict):
+                                        current_total = current_total.get('value', 0)
+                                    
+                                    if current_total >= total_products and total_products > 0:
+                                        log_and_append(f"        ✅ 全商品読み込み完了: {current_total}/{total_products}個")
+                                        break
+                                
+                                # クリーンアップ
+                                await tab.evaluate('if (window.loadMoreObserver) window.loadMoreObserver.disconnect()')
+                                
+                                # 最終商品数
+                                final_count_raw = await tab.evaluate('document.querySelectorAll("h-grid-result-item").length')
+                                final_count = normalize_nodriver_result(final_count_raw)
+                                if isinstance(final_count, dict):
+                                    final_count = final_count.get('value', 0)
+                                
+                                log_and_append(f"      📊 読み込み完了: 初期{initial_count}個 → 最終{final_count}個 ({total_clicks}回クリック)")
+                                return True
+                                
+                            except Exception as e:
+                                log_and_append(f"      ❌ 全商品読み込みエラー: {e}")
+                                return False
+                        
+                        # Load Moreで全商品を読み込む
+                        await load_all_products_with_monitoring(tab)
                         
                         # ページの完全なHTMLを取得（SaveAs相当）
                         # まずページが完全に読み込まれるまで待機
-                        log_and_append("      ⏳ ページ完全読み込み待機中...")
-                        await asyncio.sleep(5)  # 追加待機
+                        log_and_append("      ⏳ 最終レンダリング待機中...")
+                        await asyncio.sleep(3)  # 追加待機
                         
                         # JavaScriptを使用してレンダリング後のHTMLを取得
                         try:
