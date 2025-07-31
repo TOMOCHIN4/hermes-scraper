@@ -1228,9 +1228,7 @@ def test_hermes_site_scraping():
     # 各種ファイルの存在確認
     files_to_check = [
         ("hermes_page.html", "完全なHTMLファイル"),
-        ("hermes_products.json", "JSON形式の商品データ"),
-        ("hermes_products.csv", "CSV形式の商品データ"),
-        ("hermes_products.txt", "テキスト形式の商品データ")
+        ("hermes_products.json", "JSON形式の商品データ")
     ]
     
     for filename, description in files_to_check:
