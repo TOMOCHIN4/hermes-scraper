@@ -352,58 +352,39 @@ class HermesScraper:
             scroll_attempt = i + 1
             self.logger.log(f"\n      --- スクロール試行 {scroll_attempt}/{max_scrolls} ---")
 
-            # [実行] 最下部の商品要素へ直接ジャンプ
-            self.logger.log("        [実行] 最下部の商品へ直接ジャンプしてスクロールをトリガーします。")
-            scroll_result = await tab.evaluate('''
-                (async () => {
-                    // 現在のスクロール位置を記録
-                    const beforeScroll = window.scrollY;
-                    const beforeCount = document.querySelectorAll('h-grid-result-item').length;
-                    
-                    // 最下部の商品要素を取得
-                    const items = document.querySelectorAll('h-grid-result-item');
-                    if (items.length === 0) {
-                        return {
-                            success: false,
-                            message: "商品要素が見つかりません"
-                        };
-                    }
-                    
-                    // 最後から5番目の商品にフォーカス（最下部すぎると読み込みされない可能性）
-                    const targetIndex = Math.max(0, items.length - 5);
-                    const targetItem = items[targetIndex];
-                    
-                    // その要素の位置を取得
-                    const rect = targetItem.getBoundingClientRect();
-                    const absoluteTop = window.pageYOffset + rect.top;
-                    
-                    // 直接その位置にジャンプ
-                    window.scrollTo({
-                        top: absoluteTop,
-                        behavior: 'instant'  // smoothではなくinstantで即座に移動
-                    });
-                    
-                    // 少し待機してから、さらに少し下にスクロール（読み込みトリガー）
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                    
-                    // 画面の高さ分だけ追加でスクロール
-                    window.scrollBy(0, window.innerHeight);
-                    
-                    // 結果を返す
-                    return {
-                        success: true,
-                        beforeScroll: beforeScroll,
-                        afterScroll: window.scrollY,
-                        beforeCount: beforeCount,
-                        targetIndex: targetIndex,
-                        scrolled: window.scrollY > beforeScroll
-                    };
-                })()
-            ''')
+            # [実行] nodriverのscroll_downメソッドを使用
+            self.logger.log("        [実行] nodriverのscroll_downメソッドで物理的なスクロールを実行します。")
             
-            const_result = normalize_nodriver_result(scroll_result)
-            if const_result.get('scrolled'):
-                self.logger.log(f"        [成功] スクロール実行: {const_result.get('beforeScroll', 0)} → {const_result.get('afterScroll', 0)}")
+            # スクロール前の状態を取得
+            before_state = await tab.evaluate('''
+                ({
+                    scrollY: window.scrollY,
+                    itemCount: document.querySelectorAll('h-grid-result-item').length
+                })
+            ''')
+            before_state = normalize_nodriver_result(before_state)
+            
+            # nodriverのネイティブスクロールメソッドを使用
+            # 1画面分（約800ピクセル）スクロール
+            await tab.scroll_down(800)
+            
+            # 少し待機
+            await asyncio.sleep(1)
+            
+            # スクロール後の状態を取得
+            after_state = await tab.evaluate('''
+                ({
+                    scrollY: window.scrollY,
+                    itemCount: document.querySelectorAll('h-grid-result-item').length
+                })
+            ''')
+            after_state = normalize_nodriver_result(after_state)
+            
+            # スクロール結果をログ
+            if after_state.get('scrollY', 0) > before_state.get('scrollY', 0):
+                self.logger.log(f"        [成功] スクロール実行: {before_state.get('scrollY', 0)} → {after_state.get('scrollY', 0)}")
+            else:
+                self.logger.log(f"        [警告] スクロール位置が変わりませんでした: {after_state.get('scrollY', 0)}")
             
             self.logger.log("        [待機] 自動読み込みとレンダリングを待機中 (8秒)...")
             await asyncio.sleep(8)
