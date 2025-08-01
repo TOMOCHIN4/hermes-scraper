@@ -364,11 +364,42 @@ class HermesScraper:
             ''')
             before_state = normalize_nodriver_result(before_state)
             
-            # nodriverのネイティブスクロールメソッドを使用
-            # 1画面分（約800ピクセル）スクロール
-            await tab.scroll_down(800)
+            # スクロール実行（複数の方法を試行）
+            try:
+                # 方法1: nodriverのscroll_downメソッドを試行
+                await tab.scroll_down(800)
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                self.logger.log(f"        [情報] scroll_downメソッドが使用できません: {e}")
             
-            # 少し待機
+            # 方法2: JavaScriptでの確実なスクロール（フォールバック）
+            # ページ最下部付近までジャンプ
+            scroll_js_result = await tab.evaluate('''
+                (() => {
+                    const beforeY = window.scrollY;
+                    const viewHeight = window.innerHeight;
+                    const pageHeight = document.body.scrollHeight;
+                    
+                    // 現在位置から1画面分スクロール
+                    const targetY = Math.min(beforeY + viewHeight * 0.8, pageHeight - viewHeight);
+                    
+                    // 即座にジャンプ（アニメーションなし）
+                    window.scrollTo(0, targetY);
+                    
+                    return {
+                        before: beforeY,
+                        after: window.scrollY,
+                        pageHeight: pageHeight,
+                        scrolled: window.scrollY > beforeY
+                    };
+                })()
+            ''')
+            
+            scroll_result = normalize_nodriver_result(scroll_js_result)
+            if scroll_result.get('scrolled'):
+                self.logger.log(f"        [成功] JavaScriptスクロール: {scroll_result.get('before', 0)} → {scroll_result.get('after', 0)}")
+            
+            # 追加の待機
             await asyncio.sleep(1)
             
             # スクロール後の状態を取得
