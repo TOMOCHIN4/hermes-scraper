@@ -325,6 +325,13 @@ class HermesScraper:
         """ページをスクロールして全商品を読み込む（エルメスサイト仕様に特化）"""
         self.logger.log(f"    📜 動的読み込み処理開始 (エルメスサイト特化版)")
 
+        # 初期商品数を確認
+        initial_count_raw = await tab.evaluate("document.querySelectorAll('h-grid-result-item').length")
+        initial_count = normalize_nodriver_result(initial_count_raw)
+        if isinstance(initial_count, dict):
+            initial_count = initial_count.get('value', 0)
+        self.logger.log(f"\n    [初期状態] ボタンクリック前の商品数: {initial_count}個")
+        
         # --- フェーズ1: ボタンクリック（成功実績のあるコード）---
         self.logger.log("\n    --- フェーズ1: 「アイテムをもっと見る」ボタンのクリック試行 ---")
         try:
