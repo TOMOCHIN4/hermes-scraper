@@ -361,24 +361,40 @@ class HermesScraper:
                 self.logger.log(f"      🎯 サービスセクション検出: '{safe_get(service_section, 'text')}' at {safe_get(service_section, 'position')}px")
             
             # 動的スクロール処理
-            max_scroll_attempts = 20  # 最大試行回数を増加
+            max_scroll_attempts = 5  # スクロール回数を5回に制限
             no_new_items_count = 0
             last_count = initial_count
-            html_snapshot_intervals = [1, 5, 10, 15]  # HTMLスナップショットを保存するスクロール回数
+            html_snapshot_intervals = [1, 3, 5]  # HTMLスナップショットを保存するスクロール回数
             
             for scroll_attempt in range(max_scroll_attempts):
                 self.logger.log(f"      スクロール試行 {scroll_attempt + 1}/{max_scroll_attempts}")
                 
-                # スムーズスクロール
+                # 人間らしいスクロール速度で実行
                 await tab.evaluate('''
-                    window.scrollBy({
-                        top: window.innerHeight * 0.8,
-                        behavior: 'smooth'
-                    });
+                    // より人間らしいスクロール（ゆっくり、段階的に）
+                    const scrollDistance = window.innerHeight * 0.8;
+                    const scrollDuration = 2000; // 2秒かけてスクロール
+                    const scrollSteps = 20;
+                    const stepDistance = scrollDistance / scrollSteps;
+                    const stepDelay = scrollDuration / scrollSteps;
+                    
+                    let currentStep = 0;
+                    const scrollInterval = setInterval(() => {
+                        window.scrollBy({
+                            top: stepDistance,
+                            behavior: 'smooth'
+                        });
+                        currentStep++;
+                        if (currentStep >= scrollSteps) {
+                            clearInterval(scrollInterval);
+                        }
+                    }, stepDelay);
                 ''')
                 
-                # DOM安定性待機
-                await asyncio.sleep(1.5)
+                # スクロール完了待機（2秒）+ 読み込み待機（10秒）
+                await asyncio.sleep(2)  # スクロール完了待機
+                self.logger.log(f"        ⏳ 新規コンテンツ読み込み待機中（10秒）...")
+                await asyncio.sleep(10)  # 読み込み待機
                 
                 # 現在の商品数を確認（ユニーク）
                 current_count_raw = await tab.evaluate('''
@@ -436,9 +452,9 @@ class HermesScraper:
                         await self._save_html_snapshot(tab, f'scroll_bottom_reached_{current_count}.html', f'ページ最下部到達_{current_count}個')
                         self._saved_bottom_reached = True
                 
-                # 終了条件（緩和）
-                if no_new_items_count >= 5:  # 5回まで待つ
-                    self.logger.log(f"      🏁 スクロール完了: 5回連続で新規商品なし")
+                # 終了条件（スクロール回数が少ないので早めに判断）
+                if no_new_items_count >= 2:  # 2回連続で新規商品なし
+                    self.logger.log(f"      🏁 スクロール完了: 2回連続で新規商品なし")
                     await self._save_html_snapshot(tab, f'scroll_final_nomore_{current_count}.html', f'スクロール終了_新商品なし_{current_count}個')
                     break
                 
