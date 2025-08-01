@@ -436,128 +436,222 @@ class HermesScraper:
                         self.logger.log(f"        ✅ 目標達成: {progress:.1f}%")
                         break
                 
-                # Load Moreボタンのシンプルな検索とクリック
-                self.logger.log(f"        🔍 Load Moreボタンを検索中...")
-                
-                # シンプルなセレクターで直接検索
-                load_more_result = await tab.evaluate('''
-                    (function() {
-                        // エルメス固有のセレクターで直接検索
-                        const button = document.querySelector('button[data-testid="Load more items"]');
-                        
-                        if (button) {
-                            // ボタンが見つかった場合
-                            const isVisible = button.offsetParent !== null && 
-                                            button.offsetWidth > 0 && 
-                                            button.offsetHeight > 0;
-                            const isDisabled = button.disabled || button.getAttribute('aria-disabled') === 'true';
-                            
-                            // ボタン情報を返す
-                            return {
-                                found: true,
-                                text: button.textContent.trim(),
-                                isVisible: isVisible,
-                                isDisabled: isDisabled,
-                                canClick: isVisible && !isDisabled
-                            };
-                        }
-                        
-                        // バックアップ: テキストで検索
-                        const allButtons = Array.from(document.querySelectorAll('button'));
-                        for (let btn of allButtons) {
-                            const text = btn.textContent.trim();
-                            if (text === 'アイテムをもっと見る' || 
-                                text.toLowerCase().includes('load more') ||
-                                text.toLowerCase().includes('more items')) {
-                                
-                                const isVisible = btn.offsetParent !== null && 
-                                                btn.offsetWidth > 0 && 
-                                                btn.offsetHeight > 0;
-                                const isDisabled = btn.disabled || btn.getAttribute('aria-disabled') === 'true';
-                                
-                                return {
-                                    found: true,
-                                    text: text,
-                                    isVisible: isVisible,
-                                    isDisabled: isDisabled,
-                                    canClick: isVisible && !isDisabled,
-                                    fallback: true
-                                };
-                            }
-                        }
-                        
-                        return { found: false };
-                    })()
-                ''')
-                
-                button_result = normalize_nodriver_result(load_more_result)
-                
-                if safe_get(button_result, 'found'):
-                    button_text = safe_get(button_result, 'text', '')
-                    can_click = safe_get(button_result, 'canClick', False)
-                    is_fallback = safe_get(button_result, 'fallback', False)
-                    
-                    self.logger.log(f"        🎯 Load Moreボタン発見: '{button_text}'")
-                    self.logger.log(f"           - 表示状態: {safe_get(button_result, 'isVisible', False)}")
-                    self.logger.log(f"           - 無効状態: {safe_get(button_result, 'isDisabled', False)}")
-                    if is_fallback:
-                        self.logger.log(f"           - 検出方法: テキストマッチ")
-                    
-                    if can_click:
-                        try:
-                            # ボタンをクリック
-                            click_success = await tab.evaluate('''
-                                (function() {
-                                    // エルメス固有セレクターで再検索
-                                    let button = document.querySelector('button[data-testid="Load more items"]');
-                                    
-                                    // バックアップ
-                                    if (!button) {
-                                        const allButtons = Array.from(document.querySelectorAll('button'));
-                                        for (let btn of allButtons) {
-                                            const text = btn.textContent.trim();
-                                            if (text === 'アイテムをもっと見る' || 
-                                                text.toLowerCase().includes('load more')) {
-                                                button = btn;
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    
-                                    if (button && !button.disabled) {
-                                        // スクロールして表示
-                                        button.scrollIntoView({behavior: 'smooth', block: 'center'});
-                                        
-                                        // 少し待ってからクリック
-                                        setTimeout(() => {
-                                            button.click();
-                                        }, 500);
-                                        
-                                        return true;
-                                    }
-                                    return false;
-                                })()
-                            ''')
-                            
-                            if normalize_nodriver_result(click_success):
-                                self.logger.log(f"        ✅ Load Moreボタンクリック成功: '{button_text}'")
-                                self.logger.log(f"        ⏳ 新規商品の読み込み待機中（5秒）...")
-                                await asyncio.sleep(5)
-                                no_new_items_count = 0  # カウントリセット
-                            else:
-                                self.logger.log(f"        ⚠️ クリック失敗")
-                                
-                        except Exception as e:
-                            self.logger.log(f"        ❌ クリックエラー: {e}")
-                    else:
-                        self.logger.log(f"        ⚠️ ボタンはクリックできない状態です")
-                else:
-                    self.logger.log(f"        ℹ️ Load Moreボタンが見つかりませんでした")
+                # エルメス専用Load Moreボタンハンドラー
+                clicked = await self._handle_hermes_load_more(tab)
+                if clicked:
+                    no_new_items_count = 0  # カウントリセット
             
             self.logger.log(f"    ✅ スクロール処理完了: 総商品数 {last_count}（ユニーク）")
             
         except Exception as scroll_error:
             self.logger.log(f"    ⚠️ スクロールエラー: {scroll_error}")
+    
+    async def _handle_hermes_load_more(self, tab):
+        """エルメス専用「もっと見る」ボタン処理"""
+        self.logger.log(f"        🔍 エルメスLoad Moreボタンを検索中...")
+        
+        # エルメス特有のセレクター（優先度順）
+        selectors = [
+            'button[data-testid="Load more items"]',  # 最優先
+            'h-call-to-action button',
+            '.grid-result-footer button',
+            'h-grid-result-footer button',
+            'button.button-secondary[type="button"]',
+            '.button-secondary'
+        ]
+        
+        for i, selector in enumerate(selectors):
+            try:
+                # ボタンの存在確認
+                button_info = await tab.evaluate(f'''
+                    (function() {{
+                        const button = document.querySelector('{selector}');
+                        if (button) {{
+                            const rect = button.getBoundingClientRect();
+                            return {{
+                                exists: true,
+                                visible: button.offsetParent !== null && 
+                                        button.offsetWidth > 0 && 
+                                        button.offsetHeight > 0,
+                                text: button.textContent.trim(),
+                                disabled: button.disabled || button.getAttribute('aria-disabled') === 'true',
+                                rect: {{
+                                    top: rect.top,
+                                    left: rect.left,
+                                    width: rect.width,
+                                    height: rect.height
+                                }}
+                            }};
+                        }}
+                        return {{exists: false}};
+                    }})()
+                ''')
+                
+                button_data = normalize_nodriver_result(button_info)
+                
+                if safe_get(button_data, 'exists'):
+                    button_text = safe_get(button_data, 'text', '')
+                    is_visible = safe_get(button_data, 'visible', False)
+                    is_disabled = safe_get(button_data, 'disabled', False)
+                    
+                    if i == 0:  # 最優先セレクター
+                        self.logger.log(f"        ⭐ エルメス固有ボタン発見: '{button_text}'")
+                    else:
+                        self.logger.log(f"        🎯 セレクター{i+1}でボタン発見: '{button_text}'")
+                    
+                    self.logger.log(f"           - 表示状態: {is_visible}")
+                    self.logger.log(f"           - 無効状態: {is_disabled}")
+                    
+                    if is_visible and not is_disabled:
+                        # 複数のクリック方法を試行
+                        success = await self._click_hermes_button(tab, selector)
+                        if success:
+                            return True
+                    else:
+                        self.logger.log(f"           - ⚠️ ボタンはクリック不可状態")
+                        
+            except Exception as e:
+                self.logger.log(f"        ❌ セレクター{i+1}エラー: {str(e)}")
+                continue
+        
+        self.logger.log(f"        ℹ️ Load Moreボタンが見つかりませんでした")
+        return False
+    
+    async def _click_hermes_button(self, tab, selector):
+        """エルメスボタンの確実クリック"""
+        try:
+            # Step 1: ボタンまでスクロール
+            self.logger.log("           📜 ボタンまでスクロール中...")
+            await tab.evaluate(f'''
+                const button = document.querySelector('{selector}');
+                if (button) {{
+                    button.scrollIntoView({{
+                        behavior: 'smooth',
+                        block: 'center',
+                        inline: 'center'
+                    }});
+                }}
+            ''')
+            
+            # スクロール完了待機
+            await asyncio.sleep(2)
+            
+            # Step 2: 複数のクリック方法を試行
+            click_methods = [
+                # 方法1: 標準のclick()
+                {
+                    'name': 'standard_click',
+                    'script': f'''
+                        const button = document.querySelector('{selector}');
+                        if (button && !button.disabled && button.offsetParent !== null) {{
+                            button.click();
+                            return true;
+                        }}
+                        return false;
+                    '''
+                },
+                # 方法2: MouseEventでクリック
+                {
+                    'name': 'mouse_event',
+                    'script': f'''
+                        const button = document.querySelector('{selector}');
+                        if (button && !button.disabled && button.offsetParent !== null) {{
+                            const rect = button.getBoundingClientRect();
+                            const event = new MouseEvent('click', {{
+                                bubbles: true,
+                                cancelable: true,
+                                view: window,
+                                clientX: rect.left + rect.width / 2,
+                                clientY: rect.top + rect.height / 2
+                            }});
+                            button.dispatchEvent(event);
+                            return true;
+                        }}
+                        return false;
+                    '''
+                },
+                # 方法3: Angular特有のクリックイベント
+                {
+                    'name': 'angular_click',
+                    'script': f'''
+                        const button = document.querySelector('{selector}');
+                        if (button && !button.disabled && button.offsetParent !== null) {{
+                            // Angularのイベントリスナーを直接トリガー
+                            const event = new Event('click', {{bubbles: true}});
+                            button.dispatchEvent(event);
+                            
+                            // 追加でngイベントも発火
+                            const ngEvent = new CustomEvent('ngclick', {{bubbles: true}});
+                            button.dispatchEvent(ngEvent);
+                            return true;
+                        }}
+                        return false;
+                    '''
+                }
+            ]
+            
+            for method in click_methods:
+                try:
+                    result = await tab.evaluate(method['script'])
+                    if normalize_nodriver_result(result):
+                        self.logger.log(f"           ✅ クリック成功: {method['name']}")
+                        
+                        # クリック後の処理完了を待機
+                        await self._wait_for_loading_completion(tab)
+                        return True
+                        
+                except Exception as e:
+                    self.logger.log(f"           ❌ {method['name']}失敗: {e}")
+                    continue
+            
+            return False
+            
+        except Exception as e:
+            self.logger.log(f"           💥 クリック処理エラー: {e}")
+            return False
+    
+    async def _wait_for_loading_completion(self, tab):
+        """読み込み完了を待機"""
+        self.logger.log("           ⏳ 読み込み完了を待機中...")
+        
+        # 基本待機
+        await asyncio.sleep(3)
+        
+        # 商品数の変化を監視
+        try:
+            await tab.evaluate('''
+                new Promise((resolve) => {
+                    let previousCount = document.querySelectorAll('h-grid-result-item').length;
+                    let stableCount = 0;
+                    
+                    const checkInterval = setInterval(() => {
+                        const currentCount = document.querySelectorAll('h-grid-result-item').length;
+                        
+                        if (currentCount === previousCount) {
+                            stableCount++;
+                            if (stableCount >= 3) {  // 3回連続で変化なし
+                                clearInterval(checkInterval);
+                                resolve();
+                            }
+                        } else {
+                            stableCount = 0;
+                            previousCount = currentCount;
+                        }
+                    }, 1000);
+                    
+                    // 最大待機時間
+                    setTimeout(() => {
+                        clearInterval(checkInterval);
+                        resolve();
+                    }, 10000);  // 10秒でタイムアウト
+                });
+            ''')
+            
+            self.logger.log("           ✅ 読み込み完了")
+            
+        except Exception as e:
+            self.logger.log(f"           ⚠️ 待機中にエラー: {e}")
+            await asyncio.sleep(2)  # フォールバック
     
     async def _download_html(self, tab):
         """HTMLをダウンロード"""
