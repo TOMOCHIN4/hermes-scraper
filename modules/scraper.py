@@ -347,15 +347,24 @@ class HermesScraper:
                 ''')
                 await asyncio.sleep(1)
                 await button.click()
-                self.logger.log("      [待機] クリック後の商品読み込み待機中（20秒）...")
-                await asyncio.sleep(20)
+                self.logger.log("      [待機] クリック後の商品読み込み待機中（10秒）...")
+                await asyncio.sleep(10)
+                
+                # ページ最下部へスクロール（巨大ウィンドウでも確実に最下部へ）
+                self.logger.log("      [スクロール] ページ最下部へ移動...")
+                await tab.evaluate('''
+                    window.scrollTo(0, document.body.scrollHeight);
+                ''')
+                
+                self.logger.log("      [待機] スクロール後の追加読み込み待機中（10秒）...")
+                await asyncio.sleep(10)
                 
                 # 読み込み状況を確認
                 item_count = await tab.evaluate("document.querySelectorAll('h-grid-result-item').length")
                 count = normalize_nodriver_result(item_count)
                 if isinstance(count, dict):
                     count = count.get('value', 0)
-                self.logger.log(f"      [確認] ボタンクリック後の商品数: {count}個")
+                self.logger.log(f"      [確認] 最終的な商品数: {count}個")
         except Exception:
             self.logger.log("      [情報] ボタン処理でタイムアウトまたはエラー。")
 
