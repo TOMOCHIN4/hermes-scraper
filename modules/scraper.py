@@ -341,7 +341,7 @@ class HermesScraper:
 
             # [実行] ユーザーのキーボード操作（PageDown）を完全に模倣
             self.logger.log("        [実行] キーボードの「PageDown」キーを押下します。")
-            await tab.press('PageDown')
+            await tab.send_keys('\ue00f')  # PageDownキーのUnicodeエスケープシーケンス
             
             self.logger.log("        [待機] 自動読み込みとレンダリングを待機中 (8秒)...")
             await asyncio.sleep(8)
