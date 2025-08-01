@@ -159,8 +159,11 @@ class HermesScraper:
             if safe_get(total_count_info, 'found'):
                 self.total_items = safe_get(total_count_info, 'count', 0)
                 self.logger.log(f"    📊 総商品数を検出: {self.total_items} ({safe_get(total_count_info, 'text')})")
-                if safe_get(total_count_info, 'element'):
-                    self.logger.log(f"    📍 取得元: {safe_get(total_count_info, 'element')}要素")
+                element_source = safe_get(total_count_info, 'element', None)
+                if element_source:
+                    self.logger.log(f"    📍 取得元: {element_source}要素")
+                else:
+                    self.logger.log(f"    📍 取得元: ページ全体のテキスト")
             else:
                 self.logger.log(f"    ⚠️ 総商品数を検出できませんでした")
                 
