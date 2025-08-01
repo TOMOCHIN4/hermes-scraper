@@ -35,7 +35,7 @@ class HermesScraper:
             '--exclude-switches=enable-automation',
             '--disable-extensions',
             '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            '--window-size=1920,10000',  # 超縦長ウィンドウ（高さ10000ピクセル）
+            '--window-size=1920,15000',  # 超巨大縦長ウィンドウ（高さ15000ピクセル）
             '--start-maximized'
         ]
         
@@ -46,7 +46,7 @@ class HermesScraper:
         )
         
         self.logger.log(f"    ✅ Browser開始成功: {type(self.browser)}")
-        self.logger.log(f"    📐 ウィンドウサイズ: 1920x10000 (超縦長設定)")
+        self.logger.log(f"    📐 ウィンドウサイズ: 1920x15000 (超巨大縦長設定)")
         self.logger.log("")
     
     async def close_browser(self):
@@ -368,11 +368,20 @@ class HermesScraper:
             self.logger.log(f"\n    [現状] 取得率: {current_rate:.1f}% ({last_count}/{self.total_items})")
             
         # 巨大ウィンドウの効果を確認
-        self.logger.log("\n    [確認] 巨大ウィンドウ(1920x10000)での初期表示商品数を検証中...")
+        self.logger.log("\n    [確認] 超巨大ウィンドウ(1920x15000)での初期表示商品数を検証中...")
         
-        # もし96商品以上取得できていたら成功
-        if last_count > 96:
-            self.logger.log(f"    🎉 [成功] 巨大ウィンドウにより{last_count}商品を取得！")
+        # 取得結果を評価
+        if last_count >= self.total_items:
+            self.logger.log(f"    🎉🎉 [完全成功] 全{self.total_items}商品を取得完了！")
+            self.logger.log("    [結論] 100%の商品取得に成功しました！")
+            return
+        elif last_count > 144:
+            self.logger.log(f"    🎉 [大成功] 巨大ウィンドウにより{last_count}商品を取得！")
+            self.logger.log(f"    [進捗] 前回の144商品から{last_count - 144}商品増加")
+            self.logger.log("    [結論] ウィンドウサイズ15000px戦略がさらに有効でした。")
+            return
+        elif last_count > 96:
+            self.logger.log(f"    ✅ [成功] 巨大ウィンドウにより{last_count}商品を取得")
             self.logger.log("    [結論] ウィンドウサイズ拡大戦略が有効でした。")
             return
         
