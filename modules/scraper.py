@@ -450,11 +450,15 @@ class HermesScraper:
                     
                     if button_exists:
                         self.logger.log(f"        🔘 Load Moreボタンが存在します")
-                        clicked = await self._handle_hermes_load_more(tab)
-                        if clicked:
+                        
+                        # ボタンをクリックする代わりに、Angularの内部関数を直接呼び出す
+                        # Load More機能をトリガーする別の方法を試す
+                        api_triggered = await self._trigger_load_more_via_api(tab, current_count)
+                        
+                        if api_triggered:
                             no_new_items_count = 0  # カウントリセット
-                            # クリック後、実際に新しい商品が読み込まれたか確認
-                            await asyncio.sleep(2)
+                            # API呼び出し後、新しい商品が読み込まれたか確認
+                            await asyncio.sleep(3)
                             new_count_raw = await tab.evaluate('''
                                 (function() {
                                     const items = document.querySelectorAll('h-grid-result-item');
@@ -472,10 +476,35 @@ class HermesScraper:
                             if isinstance(new_count, dict):
                                 new_count = new_count.get('value', 0)
                             
-                            if new_count == current_count:
-                                self.logger.log(f"        ⚠️ クリックしたが新しい商品が読み込まれませんでした")
-                                self.logger.log(f"        💡 ボタンが機能していない可能性があります")
-                                break  # ループを終了
+                            if new_count > current_count:
+                                self.logger.log(f"        ✅ API経由で新しい商品を読み込みました: +{new_count - current_count}")
+                            else:
+                                # 通常のクリック方法も試す
+                                clicked = await self._handle_hermes_load_more(tab)
+                                if clicked:
+                                    await asyncio.sleep(2)
+                                    # 再度商品数を確認
+                                    final_count_raw = await tab.evaluate('''
+                                        (function() {
+                                            const items = document.querySelectorAll('h-grid-result-item');
+                                            const uniqueUrls = new Set();
+                                            items.forEach(item => {
+                                                const link = item.querySelector('a');
+                                                if (link && link.href) {
+                                                    uniqueUrls.add(link.href);
+                                                }
+                                            });
+                                            return uniqueUrls.size;
+                                        })()
+                                    ''')
+                                    final_count = normalize_nodriver_result(final_count_raw)
+                                    if isinstance(final_count, dict):
+                                        final_count = final_count.get('value', 0)
+                                    
+                                    if final_count == current_count:
+                                        self.logger.log(f"        ⚠️ クリックしたが新しい商品が読み込まれませんでした")
+                                        self.logger.log(f"        💡 ボタンが機能していない可能性があります")
+                                        break  # ループを終了
                     else:
                         self.logger.log(f"        ℹ️ Load Moreボタンが見つかりません（全商品表示済み）")
                         break
@@ -577,67 +606,107 @@ class HermesScraper:
             
             # Step 2: 複数のクリック方法を試行
             click_methods = [
-                # 方法1: Angular特有のクリックイベント（最優先）
+                # 方法1: Angular/Hermesサイト専用のクリック
                 {
-                    'name': 'angular_click',
+                    'name': 'hermes_angular_click',
                     'script': f'''
                         const button = document.querySelector('{selector}');
                         if (button && !button.disabled && button.offsetParent !== null) {{
-                            // Angularのイベントリスナーを直接トリガー
-                            const clickEvent = new Event('click', {{
-                                bubbles: true,
-                                cancelable: true,
-                                view: window
-                            }});
-                            button.dispatchEvent(clickEvent);
+                            // ボタンのAngularコンポーネントを特定
+                            const hermesButton = button.closest('h-call-to-action');
                             
-                            // Angular向けの追加イベント
-                            const mouseEvent = new MouseEvent('mousedown', {{
+                            // 1. mousedownイベント
+                            const mouseDownEvent = new MouseEvent('mousedown', {{
                                 bubbles: true,
                                 cancelable: true,
-                                view: window
+                                view: window,
+                                button: 0,
+                                buttons: 1
                             }});
-                            button.dispatchEvent(mouseEvent);
+                            button.dispatchEvent(mouseDownEvent);
                             
-                            const mouseUpEvent = new MouseEvent('mouseup', {{
-                                bubbles: true,
-                                cancelable: true,
-                                view: window
-                            }});
-                            button.dispatchEvent(mouseUpEvent);
+                            // 2. クリックイベント前の小さな待機
+                            setTimeout(() => {{
+                                // 3. clickイベント
+                                const clickEvent = new MouseEvent('click', {{
+                                    bubbles: true,
+                                    cancelable: true,
+                                    view: window,
+                                    button: 0,
+                                    buttons: 0
+                                }});
+                                button.dispatchEvent(clickEvent);
+                                
+                                // 4. mouseupイベント
+                                const mouseUpEvent = new MouseEvent('mouseup', {{
+                                    bubbles: true,
+                                    cancelable: true,
+                                    view: window,
+                                    button: 0,
+                                    buttons: 0
+                                }});
+                                button.dispatchEvent(mouseUpEvent);
+                            }}, 50);
                             
                             return true;
                         }}
                         return false;
                     '''
                 },
-                # 方法2: MouseEventでクリック
+                # 方法2: ボタンのネイティブクリックメソッド呼び出し
                 {
-                    'name': 'mouse_event',
+                    'name': 'native_element_click',
+                    'script': f'''
+                        const button = document.querySelector('{selector}');
+                        if (button && !button.disabled && button.offsetParent !== null) {{
+                            // HTMLElementのclickメソッドを直接呼び出し
+                            HTMLElement.prototype.click.call(button);
+                            return true;
+                        }}
+                        return false;
+                    '''
+                },
+                # 方法3: PointerEventを使用（最新のブラウザ向け）
+                {
+                    'name': 'pointer_event_click',
                     'script': f'''
                         const button = document.querySelector('{selector}');
                         if (button && !button.disabled && button.offsetParent !== null) {{
                             const rect = button.getBoundingClientRect();
-                            const event = new MouseEvent('click', {{
+                            const x = rect.left + rect.width / 2;
+                            const y = rect.top + rect.height / 2;
+                            
+                            // pointerdownイベント
+                            button.dispatchEvent(new PointerEvent('pointerdown', {{
                                 bubbles: true,
                                 cancelable: true,
                                 view: window,
-                                clientX: rect.left + rect.width / 2,
-                                clientY: rect.top + rect.height / 2
-                            }});
-                            button.dispatchEvent(event);
-                            return true;
-                        }}
-                        return false;
-                    '''
-                },
-                # 方法3: 標準のclick()
-                {
-                    'name': 'standard_click',
-                    'script': f'''
-                        const button = document.querySelector('{selector}');
-                        if (button && !button.disabled && button.offsetParent !== null) {{
-                            button.click();
+                                clientX: x,
+                                clientY: y,
+                                pointerId: 1,
+                                pointerType: "mouse"
+                            }}));
+                            
+                            // pointerupイベント
+                            button.dispatchEvent(new PointerEvent('pointerup', {{
+                                bubbles: true,
+                                cancelable: true,
+                                view: window,
+                                clientX: x,
+                                clientY: y,
+                                pointerId: 1,
+                                pointerType: "mouse"
+                            }}));
+                            
+                            // clickイベント
+                            button.dispatchEvent(new MouseEvent('click', {{
+                                bubbles: true,
+                                cancelable: true,
+                                view: window,
+                                clientX: x,
+                                clientY: y
+                            }}));
+                            
                             return true;
                         }}
                         return false;
@@ -793,6 +862,72 @@ class HermesScraper:
             
         except Exception as e:
             self.logger.log(f"    ❌ HTMLダウンロードエラー: {e}")
+            return False
+    
+    async def _trigger_load_more_via_api(self, tab, current_count):
+        """APIを直接呼び出してLoad Moreを実行"""
+        self.logger.log(f"        🔌 API経由でLoad Moreを試行中...")
+        
+        try:
+            # Angularアプリケーションの内部状態にアクセス
+            result = await tab.evaluate('''
+                (function() {
+                    try {
+                        // Angularコンポーネントを探す
+                        const button = document.querySelector('button[data-testid="Load more items"]');
+                        if (!button) return { success: false, error: 'Button not found' };
+                        
+                        // h-call-to-actionコンポーネントを取得
+                        const callToAction = button.closest('h-call-to-action');
+                        if (!callToAction) return { success: false, error: 'Component not found' };
+                        
+                        // AngularのngZoneを使用してクリックをトリガー
+                        if (window.ng && window.ng.getComponent) {
+                            const component = window.ng.getComponent(callToAction);
+                            if (component && component.onClick) {
+                                component.onClick();
+                                return { success: true, method: 'Angular component' };
+                            }
+                        }
+                        
+                        // Angular DevToolsのAPIを試す
+                        if (window.getAllAngularRootElements) {
+                            const rootElements = window.getAllAngularRootElements();
+                            for (let element of rootElements) {
+                                const debugElement = window.ng.probe(element);
+                                if (debugElement) {
+                                    const componentInstance = debugElement.componentInstance;
+                                    if (componentInstance && componentInstance.loadMore) {
+                                        componentInstance.loadMore();
+                                        return { success: true, method: 'Angular debug API' };
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // 最後の手段：グローバルな関数を探す
+                        if (window.loadMoreItems || window.hermesLoadMore) {
+                            (window.loadMoreItems || window.hermesLoadMore)();
+                            return { success: true, method: 'Global function' };
+                        }
+                        
+                        return { success: false, error: 'No API method found' };
+                    } catch (e) {
+                        return { success: false, error: e.toString() };
+                    }
+                })()
+            ''')
+            
+            api_result = normalize_nodriver_result(result)
+            if safe_get(api_result, 'success'):
+                self.logger.log(f"        ✅ API呼び出し成功: {safe_get(api_result, 'method')}")
+                return True
+            else:
+                self.logger.log(f"        ❌ API呼び出し失敗: {safe_get(api_result, 'error')}")
+                return False
+                
+        except Exception as e:
+            self.logger.log(f"        ❌ API呼び出しエラー: {e}")
             return False
     
     def get_results(self):
