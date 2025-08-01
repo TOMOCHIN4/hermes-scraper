@@ -8,6 +8,7 @@ import asyncio
 import gradio as gr
 from datetime import datetime
 import traceback
+import time
 
 # モジュールのインポート
 from modules import (
@@ -107,12 +108,25 @@ def get_downloadable_files():
     """ダウンロード可能なファイルリストを取得"""
     files = FileHandler.get_downloadable_files()
     
+    # クリック前後のHTMLファイルも追加
+    additional_files = ['before_click.html', 'after_click.html']
+    for filename in additional_files:
+        if os.path.exists(filename):
+            stat = os.stat(filename)
+            file_size = stat.st_size / 1024
+            modified_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(stat.st_mtime))
+            files.append({
+                'name': filename,
+                'size_kb': f"{file_size:.1f} KB",
+                'modified': modified_time
+            })
+    
     if not files:
         return [("ファイルがありません", None)]
     
     # Gradio用のファイルリストを作成
     file_list = []
-    for file in files[:10]:  # 最新10件まで
+    for file in files[:15]:  # 最斖15件まで
         file_list.append((f"{file['name']} ({file['size_kb']}, {file['modified']})", file['name']))
     
     return file_list

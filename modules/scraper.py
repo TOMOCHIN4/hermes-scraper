@@ -451,11 +451,19 @@ class HermesScraper:
                     if button_exists:
                         self.logger.log(f"        🔘 Load Moreボタンが存在します")
                         
+                        # クリック前のHTMLを保存
+                        await self._save_html_snapshot(tab, 'before_click.html', 'クリック前')
+                        
                         clicked = await self._handle_hermes_load_more(tab)
                         if clicked:
                             no_new_items_count = 0  # カウントリセット
-                            # クリック後、新しい商品が読み込まれたか確認
-                            await asyncio.sleep(3)
+                            # クリック後30秒待機
+                            self.logger.log(f"        ⏳ 30秒待機中...")
+                            await asyncio.sleep(30)
+                            
+                            # クリック後のHTMLを保存
+                            await self._save_html_snapshot(tab, 'after_click.html', 'クリック後30秒')
+                            
                             new_count_raw = await tab.evaluate('''
                                 (function() {
                                     const items = document.querySelectorAll('h-grid-result-item');
@@ -626,6 +634,39 @@ class HermesScraper:
         except Exception as e:
             self.logger.log(f"    ❌ HTMLダウンロードエラー: {e}")
             return False
+    
+    async def _save_html_snapshot(self, tab, filename, label):
+        """現在のHTMLスナップショットを保存"""
+        try:
+            self.logger.log(f"    📸 {label}のHTMLを保存中...")
+            
+            # 完全なHTMLを取得
+            html_raw = await tab.evaluate('document.documentElement.outerHTML')
+            html_content = normalize_nodriver_result(html_raw)
+            if isinstance(html_content, dict):
+                html_content = html_content.get('html', html_content.get('value', str(html_raw)))
+            
+            # HTMLを保存
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+            
+            file_size = len(html_content.encode('utf-8'))
+            self.logger.log(f"    ✅ {label}HTML保存完了: {filename} ({file_size/1024:.1f} KB)")
+            
+            # 商品数をカウント
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html_content, 'lxml')
+            items = soup.find_all('h-grid-result-item')
+            unique_urls = set()
+            for item in items:
+                link = item.find('a')
+                if link and link.get('href'):
+                    unique_urls.add(link['href'])
+            
+            self.logger.log(f"    📊 {label}商品数: {len(unique_urls)}個")
+            
+        except Exception as e:
+            self.logger.log(f"    ❌ {label}HTML保存エラー: {e}")
     
     def get_results(self):
         """実行結果を取得"""
