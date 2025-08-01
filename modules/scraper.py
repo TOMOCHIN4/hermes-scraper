@@ -354,8 +354,29 @@ class HermesScraper:
                 ''')
                 await asyncio.sleep(1)
                 await button.click()
-                self.logger.log("      [待機] クリック後の商品読み込み待機中（30秒）...")
-                await asyncio.sleep(30)
+                self.logger.log("      [待機] クリック後の商品読み込み待機中（10秒）...")
+                await asyncio.sleep(10)
+                
+                # ページ最下部へスクロール（巨大ウィンドウでも確実に最下部へ）
+                self.logger.log("      [スクロール] ページ最下部へ移動...")
+                scroll_result = await tab.evaluate('''
+                    (() => {
+                        const before = window.scrollY;
+                        window.scrollTo(0, document.body.scrollHeight);
+                        const after = window.scrollY;
+                        return {
+                            before: before,
+                            after: after,
+                            bodyHeight: document.body.scrollHeight,
+                            success: after > before
+                        };
+                    })()
+                ''')
+                scroll_info = normalize_nodriver_result(scroll_result)
+                self.logger.log(f"      [スクロール結果] {scroll_info.get('before', 0)} → {scroll_info.get('after', 0)} (ページ高さ: {scroll_info.get('bodyHeight', 0)})")
+                
+                self.logger.log("      [待機] スクロール後の追加読み込み待機中（10秒）...")
+                await asyncio.sleep(10)
                 
                 # 読み込み状況を確認
                 item_count = await tab.evaluate("document.querySelectorAll('h-grid-result-item').length")
