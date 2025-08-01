@@ -357,25 +357,47 @@ class HermesScraper:
                 self.logger.log("      [待機] クリック後の商品読み込み待機中（10秒）...")
                 await asyncio.sleep(10)
                 
-                # ページ最下部へスクロール（巨大ウィンドウでも確実に最下部へ）
-                self.logger.log("      [スクロール] ページ最下部へ移動...")
-                scroll_result = await tab.evaluate('''
+                # 段階的にスクロール（2回に分けて）
+                self.logger.log("      [スクロール] 段階的スクロール開始...")
+                
+                # 1回目: ページの半分までスクロール
+                scroll_result1 = await tab.evaluate('''
                     (() => {
                         const before = window.scrollY;
-                        window.scrollTo(0, document.body.scrollHeight);
+                        const halfHeight = document.body.scrollHeight / 2;
+                        window.scrollTo(0, halfHeight);
                         const after = window.scrollY;
                         return {
                             before: before,
                             after: after,
-                            bodyHeight: document.body.scrollHeight,
-                            success: after > before
+                            bodyHeight: document.body.scrollHeight
                         };
                     })()
                 ''')
-                scroll_info = normalize_nodriver_result(scroll_result)
-                self.logger.log(f"      [スクロール結果] {scroll_info.get('before', 0)} → {scroll_info.get('after', 0)} (ページ高さ: {scroll_info.get('bodyHeight', 0)})")
+                scroll1 = normalize_nodriver_result(scroll_result1)
+                self.logger.log(f"      [スクロール1/2] {scroll1.get('before', 0)} → {scroll1.get('after', 0)}")
+                await asyncio.sleep(5)
                 
-                self.logger.log("      [待機] スクロール後の追加読み込み待機中（10秒）...")
+                # 2回目: ページ最下部までスクロール
+                scroll_result2 = await tab.evaluate('''
+                    (() => {
+                        const before = window.scrollY;
+                        window.scrollTo(0, document.body.scrollHeight);
+                        const after = window.scrollY;
+                        const itemCount = document.querySelectorAll('h-grid-result-item').length;
+                        return {
+                            before: before,
+                            after: after,
+                            bodyHeight: document.body.scrollHeight,
+                            itemCount: itemCount
+                        };
+                    })()
+                ''')
+                scroll2 = normalize_nodriver_result(scroll_result2)
+                self.logger.log(f"      [スクロール2/2] {scroll2.get('before', 0)} → {scroll2.get('after', 0)} (ページ高さ: {scroll2.get('bodyHeight', 0)})")
+                self.logger.log(f"      [スクロール後商品数] {scroll2.get('itemCount', 0)}個")
+                
+                self.logger.log("      [待機] 最終読み込み待機中（10秒）...")
                 await asyncio.sleep(10)
                 
                 # 読み込み状況を確認
