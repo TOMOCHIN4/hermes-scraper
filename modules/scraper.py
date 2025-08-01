@@ -451,13 +451,10 @@ class HermesScraper:
                     if button_exists:
                         self.logger.log(f"        🔘 Load Moreボタンが存在します")
                         
-                        # ボタンをクリックする代わりに、Angularの内部関数を直接呼び出す
-                        # Load More機能をトリガーする別の方法を試す
-                        api_triggered = await self._trigger_load_more_via_api(tab, current_count)
-                        
-                        if api_triggered:
+                        clicked = await self._handle_hermes_load_more(tab)
+                        if clicked:
                             no_new_items_count = 0  # カウントリセット
-                            # API呼び出し後、新しい商品が読み込まれたか確認
+                            # クリック後、新しい商品が読み込まれたか確認
                             await asyncio.sleep(3)
                             new_count_raw = await tab.evaluate('''
                                 (function() {
@@ -476,35 +473,10 @@ class HermesScraper:
                             if isinstance(new_count, dict):
                                 new_count = new_count.get('value', 0)
                             
-                            if new_count > current_count:
-                                self.logger.log(f"        ✅ API経由で新しい商品を読み込みました: +{new_count - current_count}")
-                            else:
-                                # 通常のクリック方法も試す
-                                clicked = await self._handle_hermes_load_more(tab)
-                                if clicked:
-                                    await asyncio.sleep(2)
-                                    # 再度商品数を確認
-                                    final_count_raw = await tab.evaluate('''
-                                        (function() {
-                                            const items = document.querySelectorAll('h-grid-result-item');
-                                            const uniqueUrls = new Set();
-                                            items.forEach(item => {
-                                                const link = item.querySelector('a');
-                                                if (link && link.href) {
-                                                    uniqueUrls.add(link.href);
-                                                }
-                                            });
-                                            return uniqueUrls.size;
-                                        })()
-                                    ''')
-                                    final_count = normalize_nodriver_result(final_count_raw)
-                                    if isinstance(final_count, dict):
-                                        final_count = final_count.get('value', 0)
-                                    
-                                    if final_count == current_count:
-                                        self.logger.log(f"        ⚠️ クリックしたが新しい商品が読み込まれませんでした")
-                                        self.logger.log(f"        💡 ボタンが機能していない可能性があります")
-                                        break  # ループを終了
+                            if new_count == current_count:
+                                self.logger.log(f"        ⚠️ クリックしたが新しい商品が読み込まれませんでした")
+                                self.logger.log(f"        💡 ボタンが機能していない可能性があります")
+                                break  # ループを終了
                     else:
                         self.logger.log(f"        ℹ️ Load Moreボタンが見つかりません（全商品表示済み）")
                         break
@@ -518,283 +490,14 @@ class HermesScraper:
         """エルメス専用「もっと見る」ボタン処理"""
         self.logger.log(f"        🔍 エルメスLoad Moreボタンを検索中...")
         
-        # エルメス特有のセレクター（優先度順）
-        selectors = [
-            'button[data-testid="Load more items"]',  # 最優先
-            'h-call-to-action button',
-            '.grid-result-footer button',
-            'h-grid-result-footer button',
-            'button.button-secondary[type="button"]',
-            '.button-secondary'
-        ]
+        # 確実なセレクター
+        selector = 'button[data-testid="Load more items"]'
         
-        for i, selector in enumerate(selectors):
-            try:
-                # ボタンの存在確認
-                button_info = await tab.evaluate(f'''
-                    (function() {{
-                        const button = document.querySelector('{selector}');
-                        if (button) {{
-                            const rect = button.getBoundingClientRect();
-                            return {{
-                                exists: true,
-                                visible: button.offsetParent !== null && 
-                                        button.offsetWidth > 0 && 
-                                        button.offsetHeight > 0,
-                                text: button.textContent.trim(),
-                                disabled: button.disabled || button.getAttribute('aria-disabled') === 'true',
-                                rect: {{
-                                    top: rect.top,
-                                    left: rect.left,
-                                    width: rect.width,
-                                    height: rect.height
-                                }}
-                            }};
-                        }}
-                        return {{exists: false}};
-                    }})()
-                ''')
-                
-                button_data = normalize_nodriver_result(button_info)
-                
-                if safe_get(button_data, 'exists'):
-                    button_text = safe_get(button_data, 'text', '')
-                    is_visible = safe_get(button_data, 'visible', False)
-                    is_disabled = safe_get(button_data, 'disabled', False)
-                    
-                    if i == 0:  # 最優先セレクター
-                        self.logger.log(f"        ⭐ エルメス固有ボタン発見: '{button_text}'")
-                    else:
-                        self.logger.log(f"        🎯 セレクター{i+1}でボタン発見: '{button_text}'")
-                    
-                    self.logger.log(f"           - 表示状態: {is_visible}")
-                    self.logger.log(f"           - 無効状態: {is_disabled}")
-                    
-                    if is_visible and not is_disabled:
-                        # 複数のクリック方法を試行
-                        success = await self._click_hermes_button(tab, selector)
-                        if success:
-                            return True
-                    else:
-                        self.logger.log(f"           - ⚠️ ボタンはクリック不可状態")
-                        
-            except Exception as e:
-                self.logger.log(f"        ❌ セレクター{i+1}エラー: {str(e)}")
-                continue
-        
-        self.logger.log(f"        ℹ️ Load Moreボタンが見つかりませんでした")
-        return False
-    
-    async def _click_hermes_button(self, tab, selector):
-        """エルメスボタンの確実クリック"""
         try:
-            # Step 1: ボタンまでスクロール
-            self.logger.log("           📜 ボタンまでスクロール中...")
-            await tab.evaluate(f'''
-                const button = document.querySelector('{selector}');
-                if (button) {{
-                    button.scrollIntoView({{
-                        behavior: 'smooth',
-                        block: 'center',
-                        inline: 'center'
-                    }});
-                }}
-            ''')
-            
-            # スクロール完了待機
-            await asyncio.sleep(2)
-            
-            # Step 2: 複数のクリック方法を試行
-            click_methods = [
-                # 方法1: Angular/Hermesサイト専用のクリック
-                {
-                    'name': 'hermes_angular_click',
-                    'script': f'''
-                        const button = document.querySelector('{selector}');
-                        if (button && !button.disabled && button.offsetParent !== null) {{
-                            // ボタンのAngularコンポーネントを特定
-                            const hermesButton = button.closest('h-call-to-action');
-                            
-                            // 1. mousedownイベント
-                            const mouseDownEvent = new MouseEvent('mousedown', {{
-                                bubbles: true,
-                                cancelable: true,
-                                view: window,
-                                button: 0,
-                                buttons: 1
-                            }});
-                            button.dispatchEvent(mouseDownEvent);
-                            
-                            // 2. クリックイベント前の小さな待機
-                            setTimeout(() => {{
-                                // 3. clickイベント
-                                const clickEvent = new MouseEvent('click', {{
-                                    bubbles: true,
-                                    cancelable: true,
-                                    view: window,
-                                    button: 0,
-                                    buttons: 0
-                                }});
-                                button.dispatchEvent(clickEvent);
-                                
-                                // 4. mouseupイベント
-                                const mouseUpEvent = new MouseEvent('mouseup', {{
-                                    bubbles: true,
-                                    cancelable: true,
-                                    view: window,
-                                    button: 0,
-                                    buttons: 0
-                                }});
-                                button.dispatchEvent(mouseUpEvent);
-                            }}, 50);
-                            
-                            return true;
-                        }}
-                        return false;
-                    '''
-                },
-                # 方法2: ボタンのネイティブクリックメソッド呼び出し
-                {
-                    'name': 'native_element_click',
-                    'script': f'''
-                        const button = document.querySelector('{selector}');
-                        if (button && !button.disabled && button.offsetParent !== null) {{
-                            // HTMLElementのclickメソッドを直接呼び出し
-                            HTMLElement.prototype.click.call(button);
-                            return true;
-                        }}
-                        return false;
-                    '''
-                },
-                # 方法3: PointerEventを使用（最新のブラウザ向け）
-                {
-                    'name': 'pointer_event_click',
-                    'script': f'''
-                        const button = document.querySelector('{selector}');
-                        if (button && !button.disabled && button.offsetParent !== null) {{
-                            const rect = button.getBoundingClientRect();
-                            const x = rect.left + rect.width / 2;
-                            const y = rect.top + rect.height / 2;
-                            
-                            // pointerdownイベント
-                            button.dispatchEvent(new PointerEvent('pointerdown', {{
-                                bubbles: true,
-                                cancelable: true,
-                                view: window,
-                                clientX: x,
-                                clientY: y,
-                                pointerId: 1,
-                                pointerType: "mouse"
-                            }}));
-                            
-                            // pointerupイベント
-                            button.dispatchEvent(new PointerEvent('pointerup', {{
-                                bubbles: true,
-                                cancelable: true,
-                                view: window,
-                                clientX: x,
-                                clientY: y,
-                                pointerId: 1,
-                                pointerType: "mouse"
-                            }}));
-                            
-                            // clickイベント
-                            button.dispatchEvent(new MouseEvent('click', {{
-                                bubbles: true,
-                                cancelable: true,
-                                view: window,
-                                clientX: x,
-                                clientY: y
-                            }}));
-                            
-                            return true;
-                        }}
-                        return false;
-                    '''
-                }
-            ]
-            
-            for method in click_methods:
-                try:
-                    result = await tab.evaluate(method['script'])
-                    if normalize_nodriver_result(result):
-                        self.logger.log(f"           ✅ クリック成功: {method['name']}")
-                        
-                        # クリック後の処理完了を待機
-                        await self._wait_for_loading_completion(tab)
-                        return True
-                        
-                except Exception as e:
-                    self.logger.log(f"           ❌ {method['name']}失敗: {e}")
-                    continue
-            
-            return False
-            
-        except Exception as e:
-            self.logger.log(f"           💥 クリック処理エラー: {e}")
-            return False
-    
-    async def _wait_for_loading_completion(self, tab):
-        """読み込み完了を待機"""
-        self.logger.log("           ⏳ 読み込み完了を待機中...")
-        
-        # クリック前の商品数を記録
-        initial_count_raw = await tab.evaluate('''
-            (function() {
-                const items = document.querySelectorAll('h-grid-result-item');
-                const uniqueUrls = new Set();
-                items.forEach(item => {
-                    const link = item.querySelector('a');
-                    if (link && link.href) {
-                        uniqueUrls.add(link.href);
-                    }
-                });
-                return uniqueUrls.size;
-            })()
-        ''')
-        initial_count = normalize_nodriver_result(initial_count_raw)
-        if isinstance(initial_count, dict):
-            initial_count = initial_count.get('value', 0)
-        
-        self.logger.log(f"           📊 クリック前の商品数: {initial_count}")
-        
-        # 基本待機
-        await asyncio.sleep(3)
-        
-        # 商品数の変化を監視
-        new_items_found = False
-        for i in range(10):  # 最大10秒待つ
-            current_count_raw = await tab.evaluate('''
-                (function() {
-                    const items = document.querySelectorAll('h-grid-result-item');
-                    const uniqueUrls = new Set();
-                    items.forEach(item => {
-                        const link = item.querySelector('a');
-                        if (link && link.href) {
-                            uniqueUrls.add(link.href);
-                        }
-                    });
-                    return uniqueUrls.size;
-                })()
-            ''')
-            current_count = normalize_nodriver_result(current_count_raw)
-            if isinstance(current_count, dict):
-                current_count = current_count.get('value', 0)
-            
-            if current_count > initial_count:
-                self.logger.log(f"           ✅ 新しい商品を検出: +{current_count - initial_count}個")
-                new_items_found = True
-                break
-            
-            await asyncio.sleep(1)
-        
-        if not new_items_found:
-            self.logger.log("           ⚠️ 新しい商品が読み込まれませんでした")
-            
-            # ボタンの状態を確認
-            button_check = await tab.evaluate(f'''
+            # ボタンの存在確認
+            button_info = await tab.evaluate(f'''
                 (function() {{
-                    const button = document.querySelector('button[data-testid="Load more items"]');
+                    const button = document.querySelector('{selector}');
                     if (button) {{
                         return {{
                             exists: true,
@@ -807,13 +510,73 @@ class HermesScraper:
                 }})()
             ''')
             
-            button_info = normalize_nodriver_result(button_check)
-            if safe_get(button_info, 'exists'):
-                self.logger.log(f"           🔘 ボタン状態: 表示={safe_get(button_info, 'visible')}, 無効={safe_get(button_info, 'disabled')}")
-                if not safe_get(button_info, 'visible'):
-                    self.logger.log("           ℹ️ ボタンが非表示になりました（全商品読み込み完了）")
+            button_data = normalize_nodriver_result(button_info)
+            
+            if safe_get(button_data, 'exists'):
+                is_visible = safe_get(button_data, 'visible', False)
+                is_disabled = safe_get(button_data, 'disabled', False)
+                
+                self.logger.log(f"        ⭐ Load Moreボタン発見")
+                self.logger.log(f"           - 表示状態: {is_visible}")
+                self.logger.log(f"           - 無効状態: {is_disabled}")
+                
+                if is_visible and not is_disabled:
+                    # シンプルなクリック処理
+                    success = await self._click_hermes_button(tab, selector)
+                    return success
+                else:
+                    self.logger.log(f"           - ⚠️ ボタンはクリック不可状態")
+                    return False
             else:
-                self.logger.log("           ℹ️ ボタンが存在しません")
+                self.logger.log(f"        ℹ️ Load Moreボタンが見つかりませんでした")
+                return False
+                
+        except Exception as e:
+            self.logger.log(f"        ❌ エラー: {str(e)}")
+            return False
+    
+    async def _click_hermes_button(self, tab, selector):
+        """エルメスボタンの確実クリック"""
+        try:
+            # ボタンまでスクロール
+            self.logger.log("           📜 ボタンまでスクロール中...")
+            await tab.evaluate(f'''
+                const button = document.querySelector('{selector}');
+                if (button) {{
+                    button.scrollIntoView({{
+                        behavior: 'smooth',
+                        block: 'center'
+                    }});
+                }}
+            ''')
+            
+            # スクロール完了待機
+            await asyncio.sleep(1)
+            
+            # シンプルなクリック
+            clicked = await tab.evaluate(f'''
+                const button = document.querySelector('{selector}');
+                if (button && button.offsetParent !== null && !button.disabled) {{
+                    button.click();
+                    return true;
+                }}
+                return false;
+            ''')
+            
+            if normalize_nodriver_result(clicked):
+                self.logger.log("           ✅ ボタンクリック成功")
+                
+                # 読み込み待機
+                await asyncio.sleep(3)
+                return True
+            else:
+                self.logger.log("           ❌ ボタンクリック失敗")
+                return False
+            
+        except Exception as e:
+            self.logger.log(f"           💥 クリック処理エラー: {e}")
+            return False
+    
     
     async def _download_html(self, tab):
         """HTMLをダウンロード"""
@@ -862,72 +625,6 @@ class HermesScraper:
             
         except Exception as e:
             self.logger.log(f"    ❌ HTMLダウンロードエラー: {e}")
-            return False
-    
-    async def _trigger_load_more_via_api(self, tab, current_count):
-        """APIを直接呼び出してLoad Moreを実行"""
-        self.logger.log(f"        🔌 API経由でLoad Moreを試行中...")
-        
-        try:
-            # Angularアプリケーションの内部状態にアクセス
-            result = await tab.evaluate('''
-                (function() {
-                    try {
-                        // Angularコンポーネントを探す
-                        const button = document.querySelector('button[data-testid="Load more items"]');
-                        if (!button) return { success: false, error: 'Button not found' };
-                        
-                        // h-call-to-actionコンポーネントを取得
-                        const callToAction = button.closest('h-call-to-action');
-                        if (!callToAction) return { success: false, error: 'Component not found' };
-                        
-                        // AngularのngZoneを使用してクリックをトリガー
-                        if (window.ng && window.ng.getComponent) {
-                            const component = window.ng.getComponent(callToAction);
-                            if (component && component.onClick) {
-                                component.onClick();
-                                return { success: true, method: 'Angular component' };
-                            }
-                        }
-                        
-                        // Angular DevToolsのAPIを試す
-                        if (window.getAllAngularRootElements) {
-                            const rootElements = window.getAllAngularRootElements();
-                            for (let element of rootElements) {
-                                const debugElement = window.ng.probe(element);
-                                if (debugElement) {
-                                    const componentInstance = debugElement.componentInstance;
-                                    if (componentInstance && componentInstance.loadMore) {
-                                        componentInstance.loadMore();
-                                        return { success: true, method: 'Angular debug API' };
-                                    }
-                                }
-                            }
-                        }
-                        
-                        // 最後の手段：グローバルな関数を探す
-                        if (window.loadMoreItems || window.hermesLoadMore) {
-                            (window.loadMoreItems || window.hermesLoadMore)();
-                            return { success: true, method: 'Global function' };
-                        }
-                        
-                        return { success: false, error: 'No API method found' };
-                    } catch (e) {
-                        return { success: false, error: e.toString() };
-                    }
-                })()
-            ''')
-            
-            api_result = normalize_nodriver_result(result)
-            if safe_get(api_result, 'success'):
-                self.logger.log(f"        ✅ API呼び出し成功: {safe_get(api_result, 'method')}")
-                return True
-            else:
-                self.logger.log(f"        ❌ API呼び出し失敗: {safe_get(api_result, 'error')}")
-                return False
-                
-        except Exception as e:
-            self.logger.log(f"        ❌ API呼び出しエラー: {e}")
             return False
     
     def get_results(self):
