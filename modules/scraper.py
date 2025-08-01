@@ -437,9 +437,48 @@ class HermesScraper:
                         break
                 
                 # エルメス専用Load Moreボタンハンドラー
-                clicked = await self._handle_hermes_load_more(tab)
-                if clicked:
-                    no_new_items_count = 0  # カウントリセット
+                # ボタンが存在し、まだ全商品を取得していない場合のみ実行
+                if current_count < self.total_items:
+                    # ボタンの存在チェック
+                    button_exists_raw = await tab.evaluate('''
+                        (function() {
+                            const button = document.querySelector('button[data-testid="Load more items"]');
+                            return button && button.offsetParent !== null;
+                        })()
+                    ''')
+                    button_exists = normalize_nodriver_result(button_exists_raw)
+                    
+                    if button_exists:
+                        self.logger.log(f"        🔘 Load Moreボタンが存在します")
+                        clicked = await self._handle_hermes_load_more(tab)
+                        if clicked:
+                            no_new_items_count = 0  # カウントリセット
+                            # クリック後、実際に新しい商品が読み込まれたか確認
+                            await asyncio.sleep(2)
+                            new_count_raw = await tab.evaluate('''
+                                (function() {
+                                    const items = document.querySelectorAll('h-grid-result-item');
+                                    const uniqueUrls = new Set();
+                                    items.forEach(item => {
+                                        const link = item.querySelector('a');
+                                        if (link && link.href) {
+                                            uniqueUrls.add(link.href);
+                                        }
+                                    });
+                                    return uniqueUrls.size;
+                                })()
+                            ''')
+                            new_count = normalize_nodriver_result(new_count_raw)
+                            if isinstance(new_count, dict):
+                                new_count = new_count.get('value', 0)
+                            
+                            if new_count == current_count:
+                                self.logger.log(f"        ⚠️ クリックしたが新しい商品が読み込まれませんでした")
+                                self.logger.log(f"        💡 ボタンが機能していない可能性があります")
+                                break  # ループを終了
+                    else:
+                        self.logger.log(f"        ℹ️ Load Moreボタンが見つかりません（全商品表示済み）")
+                        break
             
             self.logger.log(f"    ✅ スクロール処理完了: 総商品数 {last_count}（ユニーク）")
             
@@ -538,13 +577,35 @@ class HermesScraper:
             
             # Step 2: 複数のクリック方法を試行
             click_methods = [
-                # 方法1: 標準のclick()
+                # 方法1: Angular特有のクリックイベント（最優先）
                 {
-                    'name': 'standard_click',
+                    'name': 'angular_click',
                     'script': f'''
                         const button = document.querySelector('{selector}');
                         if (button && !button.disabled && button.offsetParent !== null) {{
-                            button.click();
+                            // Angularのイベントリスナーを直接トリガー
+                            const clickEvent = new Event('click', {{
+                                bubbles: true,
+                                cancelable: true,
+                                view: window
+                            }});
+                            button.dispatchEvent(clickEvent);
+                            
+                            // Angular向けの追加イベント
+                            const mouseEvent = new MouseEvent('mousedown', {{
+                                bubbles: true,
+                                cancelable: true,
+                                view: window
+                            }});
+                            button.dispatchEvent(mouseEvent);
+                            
+                            const mouseUpEvent = new MouseEvent('mouseup', {{
+                                bubbles: true,
+                                cancelable: true,
+                                view: window
+                            }});
+                            button.dispatchEvent(mouseUpEvent);
+                            
                             return true;
                         }}
                         return false;
@@ -570,19 +631,13 @@ class HermesScraper:
                         return false;
                     '''
                 },
-                # 方法3: Angular特有のクリックイベント
+                # 方法3: 標準のclick()
                 {
-                    'name': 'angular_click',
+                    'name': 'standard_click',
                     'script': f'''
                         const button = document.querySelector('{selector}');
                         if (button && !button.disabled && button.offsetParent !== null) {{
-                            // Angularのイベントリスナーを直接トリガー
-                            const event = new Event('click', {{bubbles: true}});
-                            button.dispatchEvent(event);
-                            
-                            // 追加でngイベントも発火
-                            const ngEvent = new CustomEvent('ngclick', {{bubbles: true}});
-                            button.dispatchEvent(ngEvent);
+                            button.click();
                             return true;
                         }}
                         return false;
@@ -614,44 +669,82 @@ class HermesScraper:
         """読み込み完了を待機"""
         self.logger.log("           ⏳ 読み込み完了を待機中...")
         
+        # クリック前の商品数を記録
+        initial_count_raw = await tab.evaluate('''
+            (function() {
+                const items = document.querySelectorAll('h-grid-result-item');
+                const uniqueUrls = new Set();
+                items.forEach(item => {
+                    const link = item.querySelector('a');
+                    if (link && link.href) {
+                        uniqueUrls.add(link.href);
+                    }
+                });
+                return uniqueUrls.size;
+            })()
+        ''')
+        initial_count = normalize_nodriver_result(initial_count_raw)
+        if isinstance(initial_count, dict):
+            initial_count = initial_count.get('value', 0)
+        
+        self.logger.log(f"           📊 クリック前の商品数: {initial_count}")
+        
         # 基本待機
         await asyncio.sleep(3)
         
         # 商品数の変化を監視
-        try:
-            await tab.evaluate('''
-                new Promise((resolve) => {
-                    let previousCount = document.querySelectorAll('h-grid-result-item').length;
-                    let stableCount = 0;
-                    
-                    const checkInterval = setInterval(() => {
-                        const currentCount = document.querySelectorAll('h-grid-result-item').length;
-                        
-                        if (currentCount === previousCount) {
-                            stableCount++;
-                            if (stableCount >= 3) {  // 3回連続で変化なし
-                                clearInterval(checkInterval);
-                                resolve();
-                            }
-                        } else {
-                            stableCount = 0;
-                            previousCount = currentCount;
+        new_items_found = False
+        for i in range(10):  # 最大10秒待つ
+            current_count_raw = await tab.evaluate('''
+                (function() {
+                    const items = document.querySelectorAll('h-grid-result-item');
+                    const uniqueUrls = new Set();
+                    items.forEach(item => {
+                        const link = item.querySelector('a');
+                        if (link && link.href) {
+                            uniqueUrls.add(link.href);
                         }
-                    }, 1000);
-                    
-                    // 最大待機時間
-                    setTimeout(() => {
-                        clearInterval(checkInterval);
-                        resolve();
-                    }, 10000);  // 10秒でタイムアウト
-                });
+                    });
+                    return uniqueUrls.size;
+                })()
+            ''')
+            current_count = normalize_nodriver_result(current_count_raw)
+            if isinstance(current_count, dict):
+                current_count = current_count.get('value', 0)
+            
+            if current_count > initial_count:
+                self.logger.log(f"           ✅ 新しい商品を検出: +{current_count - initial_count}個")
+                new_items_found = True
+                break
+            
+            await asyncio.sleep(1)
+        
+        if not new_items_found:
+            self.logger.log("           ⚠️ 新しい商品が読み込まれませんでした")
+            
+            # ボタンの状態を確認
+            button_check = await tab.evaluate(f'''
+                (function() {{
+                    const button = document.querySelector('button[data-testid="Load more items"]');
+                    if (button) {{
+                        return {{
+                            exists: true,
+                            visible: button.offsetParent !== null,
+                            disabled: button.disabled || button.getAttribute('aria-disabled') === 'true',
+                            text: button.textContent.trim()
+                        }};
+                    }}
+                    return {{ exists: false }};
+                }})()
             ''')
             
-            self.logger.log("           ✅ 読み込み完了")
-            
-        except Exception as e:
-            self.logger.log(f"           ⚠️ 待機中にエラー: {e}")
-            await asyncio.sleep(2)  # フォールバック
+            button_info = normalize_nodriver_result(button_check)
+            if safe_get(button_info, 'exists'):
+                self.logger.log(f"           🔘 ボタン状態: 表示={safe_get(button_info, 'visible')}, 無効={safe_get(button_info, 'disabled')}")
+                if not safe_get(button_info, 'visible'):
+                    self.logger.log("           ℹ️ ボタンが非表示になりました（全商品読み込み完了）")
+            else:
+                self.logger.log("           ℹ️ ボタンが存在しません")
     
     async def _download_html(self, tab):
         """HTMLをダウンロード"""
