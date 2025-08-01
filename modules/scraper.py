@@ -328,7 +328,10 @@ class HermesScraper:
         # --- フェーズ2: キーボード「PageDown」による無限スクロール ---
         self.logger.log("\n    --- フェーズ2: 「PageDown」キープレスによる無限スクロール ---")
         
-        last_count = (await tab.evaluate("document.querySelectorAll('h-grid-result-item').length")).get('value', 0)
+        last_count_raw = await tab.evaluate("document.querySelectorAll('h-grid-result-item').length")
+        last_count = normalize_nodriver_result(last_count_raw)
+        if isinstance(last_count, dict):
+            last_count = last_count.get('value', 0)
         no_new_items_streak = 0
         max_scrolls = 15
 
@@ -379,7 +382,10 @@ class HermesScraper:
                 self.logger.log(f"\n      [警告] 最大スクロール回数 ({max_scrolls}回) に到達しました。")
         
         # 最終結果サマリー（変更なし）
-        final_count = (await tab.evaluate("document.querySelectorAll('h-grid-result-item').length")).get('value', 0)
+        final_count_raw = await tab.evaluate("document.querySelectorAll('h-grid-result-item').length")
+        final_count = normalize_nodriver_result(final_count_raw)
+        if isinstance(final_count, dict):
+            final_count = final_count.get('value', 0)
         self.logger.log(f"\n    [最終結果] スクロール処理完了。最終的な取得見込み商品数: {final_count}個")
     
     async def _click_hermes_button(self, tab, selector):
