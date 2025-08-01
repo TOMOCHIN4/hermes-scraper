@@ -546,43 +546,44 @@ class HermesScraper:
     async def _click_hermes_button(self, tab, selector):
         """エルメスボタンの確実クリック"""
         try:
-            # ボタンまでスクロール
-            self.logger.log("           📜 ボタンまでスクロール中...")
-            await tab.evaluate(f'''
-                const button = document.querySelector('{selector}');
-                if (button) {{
-                    button.scrollIntoView({{
-                        behavior: 'smooth',
-                        block: 'center'
-                    }});
-                }}
-            ''')
+            # ボタンをnodriverのAPIで直接取得
+            self.logger.log("           🔍 ボタンを検索中...")
             
-            # スクロール完了待機
-            await asyncio.sleep(1)
+            # nodriverのquery_selectorを使用
+            button = await tab.query_selector(selector)
             
-            # シンプルなクリック
-            clicked = await tab.evaluate(f'''
-                const button = document.querySelector('{selector}');
-                if (button && button.offsetParent !== null && !button.disabled) {{
-                    button.click();
-                    return true;
-                }}
-                return false;
-            ''')
-            
-            if normalize_nodriver_result(clicked):
-                self.logger.log("           ✅ ボタンクリック成功")
+            if button:
+                self.logger.log("           🎯 ボタンを発見")
                 
-                # 読み込み待機
-                await asyncio.sleep(3)
-                return True
+                # ボタンが表示されているか確認
+                is_visible = await button.is_visible()
+                is_disabled = await button.is_disabled()
+                
+                self.logger.log(f"           🔍 ボタン状態: 表示={is_visible}, 無効={is_disabled}")
+                
+                if is_visible and not is_disabled:
+                    # ボタンをビューポートにスクロール
+                    await button.scroll_into_view()
+                    await asyncio.sleep(1)
+                    
+                    # nodriverのclickメソッドを使用
+                    await button.click()
+                    self.logger.log("           ✅ ボタンクリック実行")
+                    
+                    # 読み込み待機
+                    await asyncio.sleep(5)
+                    return True
+                else:
+                    self.logger.log("           ⚠️ ボタンがクリック不可状態")
+                    return False
             else:
-                self.logger.log("           ❌ ボタンクリック失敗")
+                self.logger.log("           ❌ ボタンが見つかりません")
                 return False
             
         except Exception as e:
             self.logger.log(f"           💥 クリック処理エラー: {e}")
+            import traceback
+            self.logger.log(traceback.format_exc())
             return False
     
     
