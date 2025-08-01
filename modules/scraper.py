@@ -339,21 +339,48 @@ class HermesScraper:
             scroll_attempt = i + 1
             self.logger.log(f"\n      --- スクロール試行 {scroll_attempt}/{max_scrolls} ---")
 
-            # [実行] DevTools Protocolを使い、キーボードイベントを直接発行
-            self.logger.log("        [実行] DevTools Protocol: 「PageDown」キーの押下イベントを発行します。")
-            await tab.send(
-                'Input.dispatchKeyEvent',
-                type='keyDown',
-                windowsVirtualKeyCode=34,  # PageDownのキーコード
-                key='PageDown'
-            )
-            await asyncio.sleep(0.1) # 非常に短い待機
-            await tab.send(
-                'Input.dispatchKeyEvent',
-                type='keyUp',
-                windowsVirtualKeyCode=34,
-                key='PageDown'
-            )
+            # [実行] JavaScriptでより確実なスクロールを実行
+            self.logger.log("        [実行] JavaScriptで確実なページダウンスクロールを実行します。")
+            # エルメスサイトに最適化されたスクロール処理
+            await tab.evaluate('''
+                (async () => {
+                    // 現在のスクロール位置を記録
+                    const beforeScroll = window.scrollY;
+                    
+                    // 複数の方法でスクロールを試行
+                    // 方法1: scrollByを使った段階的スクロール
+                    const viewportHeight = window.innerHeight;
+                    const scrollStep = viewportHeight / 5;
+                    
+                    for (let i = 0; i < 5; i++) {
+                        window.scrollBy({
+                            top: scrollStep,
+                            behavior: 'smooth'
+                        });
+                        await new Promise(resolve => setTimeout(resolve, 200));
+                    }
+                    
+                    // 方法2: もし方法1で動かなかった場合、document.body.scrollTopを直接操作
+                    if (window.scrollY === beforeScroll) {
+                        document.body.scrollTop += viewportHeight;
+                        document.documentElement.scrollTop += viewportHeight;
+                    }
+                    
+                    // 方法3: それでも動かない場合、最下部の要素にフォーカス
+                    if (window.scrollY === beforeScroll) {
+                        const items = document.querySelectorAll('h-grid-result-item');
+                        if (items.length > 0) {
+                            items[items.length - 1].scrollIntoView({ behavior: 'smooth', block: 'end' });
+                        }
+                    }
+                    
+                    return {
+                        beforeScroll: beforeScroll,
+                        afterScroll: window.scrollY,
+                        scrolled: window.scrollY !== beforeScroll
+                    };
+                })()
+            ''')
             
             self.logger.log("        [待機] 自動読み込みとレンダリングを待機中 (8秒)...")
             await asyncio.sleep(8)
