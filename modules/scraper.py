@@ -335,6 +335,9 @@ class HermesScraper:
             
             self.logger.log(f"      初期商品数: {initial_count}（ユニーク）")
             
+            # 初期状態のHTMLスナップショット
+            await self._save_html_snapshot(tab, f'scroll_initial_{initial_count}.html', f'スクロール開始前_{initial_count}個')
+            
             # スクロール前のサービスセクション目印を検出
             service_section_raw = await tab.evaluate('''
                 (function() {
@@ -361,6 +364,7 @@ class HermesScraper:
             max_scroll_attempts = 20  # 最大試行回数を増加
             no_new_items_count = 0
             last_count = initial_count
+            html_snapshot_intervals = [1, 5, 10, 15]  # HTMLスナップショットを保存するスクロール回数
             
             for scroll_attempt in range(max_scroll_attempts):
                 self.logger.log(f"      スクロール試行 {scroll_attempt + 1}/{max_scroll_attempts}")
@@ -400,9 +404,16 @@ class HermesScraper:
                 if current_count > last_count:
                     self.logger.log(f"        ✅ 新規商品検出: +{current_count - last_count}")
                     no_new_items_count = 0
+                    
+                    # 新商品検出時のHTMLスナップショット保存
+                    await self._save_html_snapshot(tab, f'scroll_{scroll_attempt + 1}_newitem_{current_count}.html', f'スクロール{scroll_attempt + 1}回目_新商品検出_{current_count}個')
                 else:
                     no_new_items_count += 1
                     self.logger.log(f"        ⏸️ 新規商品なし (連続{no_new_items_count}回)")
+                
+                # 定期的なHTMLスナップショット保存（デバッグ用）
+                if (scroll_attempt + 1) in html_snapshot_intervals:
+                    await self._save_html_snapshot(tab, f'scroll_{scroll_attempt + 1}_checkpoint_{current_count}.html', f'スクロール{scroll_attempt + 1}回目_チェックポイント_{current_count}個')
                 
                 last_count = current_count
                 
@@ -420,10 +431,15 @@ class HermesScraper:
                 at_bottom = safe_get(scroll_info, 'atBottom', False)
                 if at_bottom:
                     self.logger.log(f"        📍 ページ最下部到達")
+                    # ページ最下部到達時のHTMLスナップショット
+                    if not hasattr(self, '_saved_bottom_reached'):
+                        await self._save_html_snapshot(tab, f'scroll_bottom_reached_{current_count}.html', f'ページ最下部到達_{current_count}個')
+                        self._saved_bottom_reached = True
                 
                 # 終了条件（緩和）
                 if no_new_items_count >= 5:  # 5回まで待つ
                     self.logger.log(f"      🏁 スクロール完了: 5回連続で新規商品なし")
+                    await self._save_html_snapshot(tab, f'scroll_final_nomore_{current_count}.html', f'スクロール終了_新商品なし_{current_count}個')
                     break
                 
                 # 進捗率チェック
@@ -431,9 +447,18 @@ class HermesScraper:
                     progress = current_count / self.total_items * 100
                     self.logger.log(f"        📊 進捗: {progress:.1f}% ({current_count}/{self.total_items})")
                     
+                    # マイルストーンで保存（50%, 75%, 90%）
+                    if progress >= 50 and not hasattr(self, '_saved_50_percent'):
+                        await self._save_html_snapshot(tab, f'scroll_milestone_50percent_{current_count}.html', f'マイルストーン50%達成_{current_count}個')
+                        self._saved_50_percent = True
+                    elif progress >= 75 and not hasattr(self, '_saved_75_percent'):
+                        await self._save_html_snapshot(tab, f'scroll_milestone_75percent_{current_count}.html', f'マイルストーン75%達成_{current_count}個')
+                        self._saved_75_percent = True
+                    
                     # 90%以上取得したら成功とみなす
                     if progress >= 90:
                         self.logger.log(f"        ✅ 目標達成: {progress:.1f}%")
+                        await self._save_html_snapshot(tab, f'scroll_success_90percent_{current_count}.html', f'目標達成90%_{current_count}個')
                         break
                 
                 # エルメス専用Load Moreボタンハンドラー
@@ -490,6 +515,17 @@ class HermesScraper:
                         break
             
             self.logger.log(f"    ✅ スクロール処理完了: 総商品数 {last_count}（ユニーク）")
+            
+            # デバッグ用HTMLスナップショットの保存情報
+            self.logger.log(f"    📸 保存されたHTMLスナップショット:")
+            self.logger.log(f"       - scroll_initial_{initial_count}.html")
+            if hasattr(self, '_saved_50_percent'):
+                self.logger.log(f"       - scroll_milestone_50percent_*.html")
+            if hasattr(self, '_saved_75_percent'):
+                self.logger.log(f"       - scroll_milestone_75percent_*.html")
+            if hasattr(self, '_saved_bottom_reached'):
+                self.logger.log(f"       - scroll_bottom_reached_*.html")
+            self.logger.log(f"       - その他チェックポイントと新商品検出時のファイル")
             
         except Exception as scroll_error:
             self.logger.log(f"    ⚠️ スクロールエラー: {scroll_error}")
