@@ -34,7 +34,9 @@ class HermesScraper:
             '--disable-blink-features=AutomationControlled',
             '--exclude-switches=enable-automation',
             '--disable-extensions',
-            '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            '--window-size=1920,10000',  # 超縦長ウィンドウ（高さ10000ピクセル）
+            '--start-maximized'
         ]
         
         self.browser = await nd.start(
@@ -44,6 +46,7 @@ class HermesScraper:
         )
         
         self.logger.log(f"    ✅ Browser開始成功: {type(self.browser)}")
+        self.logger.log(f"    📐 ウィンドウサイズ: 1920x10000 (超縦長設定)")
         self.logger.log("")
     
     async def close_browser(self):
@@ -84,6 +87,17 @@ class HermesScraper:
                 return success
             
             self.logger.log(f"    ✅ ページアクセス成功")
+            
+            # ウィンドウサイズを確認
+            window_size = await tab.evaluate('''
+                ({
+                    width: window.innerWidth,
+                    height: window.innerHeight,
+                    screenHeight: screen.height
+                })
+            ''')
+            ws = normalize_nodriver_result(window_size)
+            self.logger.log(f"    📐 実際のビューポート: {ws.get('width', 'N/A')}x{ws.get('height', 'N/A')}px")
             
             # ページ読み込み待機とスクロール処理
             await self._wait_for_page_load(tab)
@@ -353,12 +367,20 @@ class HermesScraper:
             current_rate = (last_count / self.total_items) * 100
             self.logger.log(f"\n    [現状] 取得率: {current_rate:.1f}% ({last_count}/{self.total_items})")
             
-        # エルメスサイトの制限により、これ以上の商品取得は困難と判断
-        self.logger.log("\n    [分析結果] エルメスサイトの仕様:")
-        self.logger.log("      - Load Moreボタン: 1回のみクリック可能（48→96商品）")
+        # 巨大ウィンドウの効果を確認
+        self.logger.log("\n    [確認] 巨大ウィンドウ(1920x10000)での初期表示商品数を検証中...")
+        
+        # もし96商品以上取得できていたら成功
+        if last_count > 96:
+            self.logger.log(f"    🎉 [成功] 巨大ウィンドウにより{last_count}商品を取得！")
+            self.logger.log("    [結論] ウィンドウサイズ拡大戦略が有効でした。")
+            return
+        
+        # 96商品のままの場合
+        self.logger.log("\n    [分析結果] 巨大ウィンドウでも96商品が上限:")
+        self.logger.log("      - エルメスサイトは表示領域に関わらず96商品までしか初期ロードしない")
         self.logger.log("      - 無限スクロール: JavaScript/bot検知により無効化")
-        self.logger.log("      - 取得可能商品数: 最大96個（全体の約58%）")
-        self.logger.log("\n    [結論] 現在の技術的制約により、96商品が取得上限です。")
+        self.logger.log("\n    [結論] ウィンドウサイズ拡大でも96商品が取得上限です。")
         
         return  # スクロール試行をスキップ
         
