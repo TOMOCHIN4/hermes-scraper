@@ -203,9 +203,115 @@ class HermesScraper:
         if not container_found:
             self.logger.log(f"    ⚠️ 商品コンテナ要素が見つかりません（20秒経過）")
     
+    async def _analyze_load_more_buttons(self, tab):
+        """ページ内のLoad Moreボタンを事前分析"""
+        self.logger.log(f"    🔍 ページ全体のボタン分析を開始...")
+        
+        try:
+            page_analysis = await tab.evaluate('''
+                (function() {
+                    // 全ボタンを収集
+                    const allButtons = Array.from(document.querySelectorAll('button, a[role="button"], [role="button"]'));
+                    
+                    // キーワードリスト（日本語・英語）
+                    const keywords = [
+                        // 日本語
+                        'もっと見る', 'もっと表示', '続きを見る', '次へ', '追加',
+                        'さらに表示', 'すべて表示', '全て表示', 'より多く',
+                        // 英語
+                        'load more', 'show more', 'view more', 'see more',
+                        'next', 'continue', 'expand', 'additional'
+                    ];
+                    
+                    const results = {
+                        totalElements: allButtons.length,
+                        byText: [],
+                        byAriaLabel: [],
+                        byClassName: [],
+                        byDataAttribute: []
+                    };
+                    
+                    allButtons.forEach((btn, index) => {
+                        const text = (btn.textContent || '').trim().toLowerCase();
+                        const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase();
+                        const className = (btn.className || '').toLowerCase();
+                        const dataTestId = btn.getAttribute('data-testid') || '';
+                        
+                        // テキストマッチ
+                        keywords.forEach(keyword => {
+                            if (text.includes(keyword.toLowerCase())) {
+                                results.byText.push({
+                                    keyword: keyword,
+                                    text: btn.textContent.trim(),
+                                    index: index
+                                });
+                            }
+                        });
+                        
+                        // aria-labelマッチ
+                        keywords.forEach(keyword => {
+                            if (ariaLabel.includes(keyword.toLowerCase())) {
+                                results.byAriaLabel.push({
+                                    keyword: keyword,
+                                    ariaLabel: btn.getAttribute('aria-label'),
+                                    index: index
+                                });
+                            }
+                        });
+                        
+                        // クラス名マッチ
+                        ['load', 'more', 'show', 'expand'].forEach(term => {
+                            if (className.includes(term)) {
+                                results.byClassName.push({
+                                    term: term,
+                                    className: btn.className,
+                                    text: btn.textContent.trim(),
+                                    index: index
+                                });
+                            }
+                        });
+                        
+                        // data属性マッチ
+                        if (dataTestId.includes('load') || dataTestId.includes('more')) {
+                            results.byDataAttribute.push({
+                                dataTestId: dataTestId,
+                                text: btn.textContent.trim(),
+                                index: index
+                            });
+                        }
+                    });
+                    
+                    return results;
+                })()
+            ''')
+            
+            analysis = normalize_nodriver_result(page_analysis)
+            
+            self.logger.log(f"    📊 ボタン分析結果:")
+            self.logger.log(f"       - 総要素数: {safe_get(analysis, 'totalElements', 0)}")
+            self.logger.log(f"       - テキストマッチ: {len(safe_get(analysis, 'byText', []))}件")
+            self.logger.log(f"       - aria-labelマッチ: {len(safe_get(analysis, 'byAriaLabel', []))}件")
+            self.logger.log(f"       - クラス名マッチ: {len(safe_get(analysis, 'byClassName', []))}件")
+            self.logger.log(f"       - data属性マッチ: {len(safe_get(analysis, 'byDataAttribute', []))}件")
+            
+            # 詳細をログ出力
+            if safe_get(analysis, 'byText'):
+                self.logger.log(f"    📝 テキストによる候補:")
+                for item in safe_get(analysis, 'byText', [])[:3]:  # 最初の3件のみ
+                    self.logger.log(f"       - '{safe_get(item, 'text')}' (キーワード: {safe_get(item, 'keyword')})")
+            
+            return analysis
+            
+        except Exception as e:
+            self.logger.log(f"    ⚠️ ボタン分析エラー: {e}")
+            return None
+    
     async def _scroll_page(self, tab):
         """ページをスクロールして全商品を読み込む"""
         self.logger.log(f"    📜 高度な動的スクロール処理開始...")
+        
+        # 最初にLoad Moreボタンの分析を実行
+        await self._analyze_load_more_buttons(tab)
         
         try:
             # 初期商品数を取得（重複を考慮）
@@ -252,7 +358,7 @@ class HermesScraper:
                 self.logger.log(f"      🎯 サービスセクション検出: '{safe_get(service_section, 'text')}' at {safe_get(service_section, 'position')}px")
             
             # 動的スクロール処理
-            max_scroll_attempts = 10  # 最大試行回数を削減
+            max_scroll_attempts = 20  # 最大試行回数を増加
             no_new_items_count = 0
             last_count = initial_count
             
@@ -315,32 +421,143 @@ class HermesScraper:
                 if at_bottom:
                     self.logger.log(f"        📍 ページ最下部到達")
                 
-                # 終了条件（早期終了）
-                if no_new_items_count >= 2 or at_bottom:  # 2回に削減
-                    if no_new_items_count >= 2:
-                        self.logger.log(f"      🏁 スクロール完了: 2回連続で新規商品なし")
+                # 終了条件（緩和）
+                if no_new_items_count >= 5:  # 5回まで待つ
+                    self.logger.log(f"      🏁 スクロール完了: 5回連続で新規商品なし")
                     break
                 
-                # Load Moreボタンチェック（省略可能）
-                if scroll_attempt < 3:  # 最初の3回のみチェック
-                    load_more_exists_raw = await tab.evaluate('''
-                        document.querySelector('button[aria-label*="Load"], button[class*="load"], button[data-testid*="load"]') !== null
-                    ''')
-                    load_more_exists = normalize_nodriver_result(load_more_exists_raw)
-                    if isinstance(load_more_exists, dict):
-                        load_more_exists = load_more_exists.get('value', False)
+                # 進捗率チェック
+                if hasattr(self, 'total_items') and self.total_items > 0:
+                    progress = current_count / self.total_items * 100
+                    self.logger.log(f"        📊 進捗: {progress:.1f}% ({current_count}/{self.total_items})")
                     
-                    if load_more_exists:
-                        self.logger.log(f"        🔘 Load Moreボタン検出")
-                        try:
-                            await tab.evaluate('''
-                                const btn = document.querySelector('button[aria-label*="Load"], button[class*="load"], button[data-testid*="load"]');
-                                if (btn) btn.click();
-                            ''')
-                            self.logger.log(f"        ✅ Load Moreボタンクリック")
-                            await asyncio.sleep(2)
-                        except:
-                            pass
+                    # 90%以上取得したら成功とみなす
+                    if progress >= 90:
+                        self.logger.log(f"        ✅ 目標達成: {progress:.1f}%")
+                        break
+                
+                # Load Moreボタンの詳細な検索とクリック
+                self.logger.log(f"        🔍 Load Moreボタンを検索中...")
+                
+                # ボタンのDOM分析
+                button_analysis = await tab.evaluate('''
+                    (function() {
+                        const buttons = Array.from(document.querySelectorAll('button'));
+                        const buttonInfo = [];
+                        
+                        buttons.forEach((btn, index) => {
+                            const text = btn.textContent.trim().toLowerCase();
+                            const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase();
+                            const classList = btn.className;
+                            const isVisible = btn.offsetParent !== null && 
+                                             btn.offsetWidth > 0 && 
+                                             btn.offsetHeight > 0;
+                            const isDisabled = btn.disabled || btn.getAttribute('aria-disabled') === 'true';
+                            
+                            // Load More系のキーワードをチェック
+                            const keywords = ['もっと', 'more', 'load', '表示', 'show', 'view', '続き', 'next'];
+                            const hasKeyword = keywords.some(kw => 
+                                text.includes(kw) || 
+                                ariaLabel.includes(kw) || 
+                                classList.toLowerCase().includes(kw)
+                            );
+                            
+                            if (hasKeyword) {
+                                buttonInfo.push({
+                                    index: index,
+                                    text: btn.textContent.trim(),
+                                    ariaLabel: btn.getAttribute('aria-label') || '',
+                                    className: classList,
+                                    id: btn.id,
+                                    isVisible: isVisible,
+                                    isDisabled: isDisabled,
+                                    rect: btn.getBoundingClientRect()
+                                });
+                            }
+                        });
+                        
+                        return {
+                            totalButtons: buttons.length,
+                            candidates: buttonInfo
+                        };
+                    })()
+                ''')
+                
+                button_info = normalize_nodriver_result(button_analysis)
+                total_buttons = safe_get(button_info, 'totalButtons', 0)
+                candidates = safe_get(button_info, 'candidates', [])
+                
+                self.logger.log(f"        📊 ボタン分析: 全{total_buttons}個中、候補{len(candidates)}個発見")
+                
+                # 候補ボタンの詳細ログ
+                for idx, candidate in enumerate(candidates):
+                    self.logger.log(f"        📍 候補{idx+1}:")
+                    self.logger.log(f"           - テキスト: '{safe_get(candidate, 'text', '')}'") 
+                    self.logger.log(f"           - aria-label: '{safe_get(candidate, 'ariaLabel', '')}'") 
+                    self.logger.log(f"           - クラス: {safe_get(candidate, 'className', '')}") 
+                    self.logger.log(f"           - 表示状態: {safe_get(candidate, 'isVisible', False)}") 
+                    self.logger.log(f"           - 無効状態: {safe_get(candidate, 'isDisabled', False)}")
+                
+                # クリック可能なボタンを見つける
+                clicked = False
+                for candidate in candidates:
+                    if safe_get(candidate, 'isVisible') and not safe_get(candidate, 'isDisabled'):
+                        button_index = safe_get(candidate, 'index', -1)
+                        button_text = safe_get(candidate, 'text', '')
+                        
+                        if button_index >= 0:
+                            self.logger.log(f"        🎯 クリック対象: '{button_text}' (index: {button_index})")
+                            
+                            try:
+                                # ボタンをスクロールして表示
+                                await tab.evaluate(f'''
+                                    (function() {{
+                                        const buttons = document.querySelectorAll('button');
+                                        const btn = buttons[{button_index}];
+                                        if (btn) {{
+                                            btn.scrollIntoView({{behavior: 'smooth', block: 'center'}});
+                                            return true;
+                                        }}
+                                        return false;
+                                    }})()
+                                ''')
+                                
+                                await asyncio.sleep(1)  # スクロール待機
+                                
+                                # クリック実行
+                                click_result = await tab.evaluate(f'''
+                                    (function() {{
+                                        const buttons = document.querySelectorAll('button');
+                                        const btn = buttons[{button_index}];
+                                        if (btn && !btn.disabled) {{
+                                            btn.click();
+                                            return {{
+                                                success: true,
+                                                text: btn.textContent.trim()
+                                            }};
+                                        }}
+                                        return {{ success: false }};
+                                    }})()
+                                ''')
+                                
+                                click_info = normalize_nodriver_result(click_result)
+                                if safe_get(click_info, 'success'):
+                                    self.logger.log(f"        ✅ Load Moreボタンクリック成功: '{button_text}'")
+                                    self.logger.log(f"        ⏳ 新規商品の読み込み待機中（5秒）...")
+                                    await asyncio.sleep(5)  # 読み込み待機を5秒に延長
+                                    clicked = True
+                                    no_new_items_count = 0  # カウントリセット
+                                    break
+                                else:
+                                    self.logger.log(f"        ⚠️ クリック失敗: '{button_text}'")
+                                    
+                            except Exception as e:
+                                self.logger.log(f"        ❌ クリックエラー: {e}")
+                
+                if not clicked and len(candidates) > 0:
+                    self.logger.log(f"        ⚠️ クリック可能なボタンが見つかりませんでした")
+                elif not clicked:
+                    self.logger.log(f"        ℹ️ Load More系のボタンは見つかりませんでした")
             
             self.logger.log(f"    ✅ スクロール処理完了: 総商品数 {last_count}（ユニーク）")
             
