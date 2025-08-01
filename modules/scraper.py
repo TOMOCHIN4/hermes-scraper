@@ -546,38 +546,67 @@ class HermesScraper:
     async def _click_hermes_button(self, tab, selector):
         """エルメスボタンの確実クリック"""
         try:
-            # ボタンをnodriverのAPIで直接取得
+            # nodriverでボタンを見つけてクリック
             self.logger.log("           🔍 ボタンを検索中...")
             
-            # nodriverのquery_selectorを使用
-            button = await tab.query_selector(selector)
-            
-            if button:
-                self.logger.log("           🎯 ボタンを発見")
-                
-                # ボタンが表示されているか確認
-                is_visible = await button.is_visible()
-                is_disabled = await button.is_disabled()
-                
-                self.logger.log(f"           🔍 ボタン状態: 表示={is_visible}, 無効={is_disabled}")
-                
-                if is_visible and not is_disabled:
-                    # ボタンをビューポートにスクロール
-                    await button.scroll_into_view()
+            # 方法1: wait_forを使用してボタンを取得
+            try:
+                button = await tab.wait_for(selector, timeout=5000)
+                if button:
+                    self.logger.log("           🎯 ボタンを発見（wait_for）")
+                    
+                    # スクロールしてボタンを表示
+                    await tab.evaluate(f'''
+                        const button = document.querySelector('{selector}');
+                        if (button) {{
+                            button.scrollIntoView({{behavior: 'smooth', block: 'center'}});
+                        }}
+                    ''')
                     await asyncio.sleep(1)
                     
-                    # nodriverのclickメソッドを使用
+                    # ボタンをクリック
                     await button.click()
-                    self.logger.log("           ✅ ボタンクリック実行")
+                    self.logger.log("           ✅ ボタンクリック実行（nodriver API）")
                     
                     # 読み込み待機
                     await asyncio.sleep(5)
                     return True
-                else:
-                    self.logger.log("           ⚠️ ボタンがクリック不可状態")
-                    return False
+            except:
+                # 方法1が失敗した場合、方法2を試す
+                self.logger.log("           ⚠️ wait_forメソッドが失敗、代替方法を試行")
+            
+            # 方法2: evaluateでクリック
+            result = await tab.evaluate(f'''
+                (async () => {{
+                    const button = document.querySelector('{selector}');
+                    if (!button) return {{success: false, error: 'Button not found'}};
+                    
+                    // ボタンの状態確認
+                    const isVisible = button.offsetParent !== null;
+                    const isDisabled = button.disabled || button.getAttribute('aria-disabled') === 'true';
+                    
+                    if (!isVisible) return {{success: false, error: 'Button not visible'}};
+                    if (isDisabled) return {{success: false, error: 'Button disabled'}};
+                    
+                    // スクロール
+                    button.scrollIntoView({{behavior: 'smooth', block: 'center'}});
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    
+                    // クリック
+                    button.click();
+                    
+                    return {{success: true}};
+                }})()
+            ''')
+            
+            result_normalized = normalize_nodriver_result(result)
+            if safe_get(result_normalized, 'success'):
+                self.logger.log("           ✅ ボタンクリック実行（evaluate）")
+                await asyncio.sleep(5)
+                return True
             else:
-                self.logger.log("           ❌ ボタンが見つかりません")
+                error_msg = safe_get(result_normalized, 'error', 'Unknown error')
+                self.logger.log(f"           ❌ クリック失敗: {error_msg}")
                 return False
             
         except Exception as e:
