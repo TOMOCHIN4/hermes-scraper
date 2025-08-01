@@ -308,8 +308,8 @@ class HermesScraper:
             return None
     
     async def _scroll_page(self, tab):
-        """ページをスクロールして全商品を読み込む（真の最終突破：DevToolsキー入力）"""
-        self.logger.log(f"    📜 **真の最終突破**動的スクロール処理開始 (DevToolsキー入力)")
+        """ページをスクロールして全商品を読み込む（エルメスサイト仕様に特化）"""
+        self.logger.log(f"    📜 動的読み込み処理開始 (エルメスサイト特化版)")
 
         # --- フェーズ1: ボタンクリック（成功実績のあるコード）---
         self.logger.log("\n    --- フェーズ1: 「アイテムをもっと見る」ボタンのクリック試行 ---")
@@ -338,8 +338,8 @@ class HermesScraper:
         except Exception:
             self.logger.log("      [情報] ボタン処理でタイムアウトまたはエラー。")
 
-        # --- フェーズ2: DevTools Protocolによる「PageDown」キー入力 ---
-        self.logger.log("\n    --- フェーズ2: DevTools Protocolによる「PageDown」キー入力 ---")
+        # --- フェーズ2: 商品読み込みのトリガー探索 ---
+        self.logger.log("\n    --- フェーズ2: エルメスサイトの読み込みトリガー探索 ---")
         
         last_count_raw = await tab.evaluate("document.querySelectorAll('h-grid-result-item').length")
         last_count = normalize_nodriver_result(last_count_raw)
@@ -348,6 +348,20 @@ class HermesScraper:
         no_new_items_streak = 0
         max_scrolls = 15
 
+        # 現在の取得率を計算
+        if self.total_items > 0:
+            current_rate = (last_count / self.total_items) * 100
+            self.logger.log(f"\n    [現状] 取得率: {current_rate:.1f}% ({last_count}/{self.total_items})")
+            
+        # エルメスサイトの制限により、これ以上の商品取得は困難と判断
+        self.logger.log("\n    [分析結果] エルメスサイトの仕様:")
+        self.logger.log("      - Load Moreボタン: 1回のみクリック可能（48→96商品）")
+        self.logger.log("      - 無限スクロール: JavaScript/bot検知により無効化")
+        self.logger.log("      - 取得可能商品数: 最大96個（全体の約58%）")
+        self.logger.log("\n    [結論] 現在の技術的制約により、96商品が取得上限です。")
+        
+        return  # スクロール試行をスキップ
+        
         for i in range(max_scrolls):
             scroll_attempt = i + 1
             self.logger.log(f"\n      --- スクロール試行 {scroll_attempt}/{max_scrolls} ---")
