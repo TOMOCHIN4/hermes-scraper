@@ -308,8 +308,8 @@ class HermesScraper:
             return None
     
     async def _scroll_page(self, tab):
-        """ページをスクロールして全商品を読み込む（最終突破：キーボード操作模倣）"""
-        self.logger.log(f"    📜 **最終突破**動的スクロール処理開始 (キーボード操作模倣)")
+        """ページをスクロールして全商品を読み込む（真の最終突破：DevToolsキー入力）"""
+        self.logger.log(f"    📜 **真の最終突破**動的スクロール処理開始 (DevToolsキー入力)")
 
         # --- フェーズ1: ボタンクリック（変更なし・成功実績あり）---
         self.logger.log("\n    --- フェーズ1: 「アイテムをもっと見る」ボタンのクリック試行 ---")
@@ -325,8 +325,8 @@ class HermesScraper:
         except Exception:
             self.logger.log("      [情報] ボタン処理でタイムアウトまたはエラー。")
 
-        # --- フェーズ2: キーボード「PageDown」による無限スクロール ---
-        self.logger.log("\n    --- フェーズ2: 「PageDown」キープレスによる無限スクロール ---")
+        # --- フェーズ2: DevTools Protocolによる「PageDown」キー入力 ---
+        self.logger.log("\n    --- フェーズ2: DevTools Protocolによる「PageDown」キー入力 ---")
         
         last_count_raw = await tab.evaluate("document.querySelectorAll('h-grid-result-item').length")
         last_count = normalize_nodriver_result(last_count_raw)
@@ -339,9 +339,21 @@ class HermesScraper:
             scroll_attempt = i + 1
             self.logger.log(f"\n      --- スクロール試行 {scroll_attempt}/{max_scrolls} ---")
 
-            # [実行] ユーザーのキーボード操作（PageDown）を完全に模倣
-            self.logger.log("        [実行] キーボードの「PageDown」キーを押下します。")
-            await tab.send_keys('\ue00f')  # PageDownキーのUnicodeエスケープシーケンス
+            # [実行] DevTools Protocolを使い、キーボードイベントを直接発行
+            self.logger.log("        [実行] DevTools Protocol: 「PageDown」キーの押下イベントを発行します。")
+            await tab.send(
+                'Input.dispatchKeyEvent',
+                type='keyDown',
+                windowsVirtualKeyCode=34,  # PageDownのキーコード
+                key='PageDown'
+            )
+            await asyncio.sleep(0.1) # 非常に短い待機
+            await tab.send(
+                'Input.dispatchKeyEvent',
+                type='keyUp',
+                windowsVirtualKeyCode=34,
+                key='PageDown'
+            )
             
             self.logger.log("        [待機] 自動読み込みとレンダリングを待機中 (8秒)...")
             await asyncio.sleep(8)
@@ -359,7 +371,6 @@ class HermesScraper:
             
             self.logger.log(f"        [検証] 現在の商品数: {current_count}個")
             self.logger.log(f"        [検証] スクロール位置: {current_state.get('scrollY', 'N/A')} / {current_state.get('scrollHeight', 'N/A')}")
-
 
             # [判断] と [終了条件]
             if current_count > last_count:
