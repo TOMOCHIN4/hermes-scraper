@@ -336,307 +336,159 @@ class HermesScraper:
         
         # --- フェーズ1: ボタンクリック（成功実績のあるコード）---
         self.logger.log("\n    --- フェーズ1: 「アイテムをもっと見る」ボタンのクリック試行 ---")
+        
+        # 総商品数が48以下の場合はボタンが存在しない
+        total_products = getattr(self, 'total_items', 0)
+        skip_button = False
+        if total_products > 0 and total_products <= 48:
+            self.logger.log(f"      [スキップ] 総商品数が{total_products}個のため、Load Moreボタンは存在しません")
+            self.logger.log(f"      [完了] 全商品が既に表示されています")
+            return  # ボタンもスクロールも不要
+        
         try:
             button_selector = 'button[data-testid="Load more items"]'
-            button = await tab.wait_for(button_selector, timeout=7000)
+            # まずボタンの存在を確認
+            button_exists = await tab.evaluate(f'!!document.querySelector("{button_selector}")')
+            button_exists = normalize_nodriver_result(button_exists)
             
-            # ボタンの可視性を確認
-            is_visible = await tab.evaluate(f'''
-                (function() {{
-                    const button = document.querySelector('{button_selector}');
-                    return button && button.offsetParent !== null;
-                }})()
-            ''')
-            is_visible = normalize_nodriver_result(is_visible)
+            if not button_exists or skip_button:
+                self.logger.log("      [情報] Load Moreボタンが見つかりません（スキップしてスクロール処理へ）")
+                skip_button = True
             
-            if button and is_visible:
-                self.logger.log("      [成功] ボタンを発見。クリックを実行します。")
-                await tab.evaluate(f'''
-                    document.querySelector('{button_selector}').scrollIntoView({{behavior: 'smooth', block: 'center'}});
+            if not skip_button:
+                button = await tab.wait_for(button_selector, timeout=5000)
+                
+                # ボタンの可視性を確認
+                is_visible = await tab.evaluate(f'''
+                    (function() {{
+                        const button = document.querySelector('{button_selector}');
+                        return button && button.offsetParent !== null;
+                    }})()
                 ''')
-                await asyncio.sleep(1)
-                await button.click()
-                self.logger.log("      [待機] クリック後の商品読み込み待機中（10秒）...")
-                await asyncio.sleep(10)
+                is_visible = normalize_nodriver_result(is_visible)
                 
-                # 段階的にスクロール（2回に分けて）
-                self.logger.log("      [スクロール] 段階的スクロール開始...")
-                
-                # 1回目: ページの半分までスクロール
-                scroll_result1 = await tab.evaluate('''
-                    (() => {
-                        const before = window.scrollY;
-                        const halfHeight = document.body.scrollHeight / 2;
-                        window.scrollTo(0, halfHeight);
-                        const after = window.scrollY;
-                        return {
-                            before: before,
-                            after: after,
-                            bodyHeight: document.body.scrollHeight
-                        };
-                    })()
-                ''')
-                scroll1 = normalize_nodriver_result(scroll_result1)
-                self.logger.log(f"      [スクロール1/2] {scroll1.get('before', 0)} → {scroll1.get('after', 0)}")
-                await asyncio.sleep(5)
-                
-                # 2回目: ページ最下部までスクロール
-                scroll_result2 = await tab.evaluate('''
-                    (() => {
-                        const before = window.scrollY;
-                        window.scrollTo(0, document.body.scrollHeight);
-                        const after = window.scrollY;
-                        const itemCount = document.querySelectorAll('h-grid-result-item').length;
-                        return {
-                            before: before,
-                            after: after,
-                            bodyHeight: document.body.scrollHeight,
-                            itemCount: itemCount
-                        };
-                    })()
-                ''')
-                scroll2 = normalize_nodriver_result(scroll_result2)
-                self.logger.log(f"      [スクロール2/2] {scroll2.get('before', 0)} → {scroll2.get('after', 0)} (ページ高さ: {scroll2.get('bodyHeight', 0)})")
-                self.logger.log(f"      [スクロール後商品数] {scroll2.get('itemCount', 0)}個")
-                
-                self.logger.log("      [待機] 最終読み込み待機中（10秒）...")
-                await asyncio.sleep(10)
-                
-                # 読み込み状況を確認
-                item_count = await tab.evaluate("document.querySelectorAll('h-grid-result-item').length")
-                count = normalize_nodriver_result(item_count)
-                if isinstance(count, dict):
-                    count = count.get('value', 0)
-                self.logger.log(f"      [確認] 最終的な商品数: {count}個")
-        except Exception:
-            self.logger.log("      [情報] ボタン処理でタイムアウトまたはエラー。")
-
-        # --- フェーズ2: 商品読み込みのトリガー探索 ---
-        self.logger.log("\n    --- フェーズ2: エルメスサイトの読み込みトリガー探索 ---")
-        
-        last_count_raw = await tab.evaluate("document.querySelectorAll('h-grid-result-item').length")
-        last_count = normalize_nodriver_result(last_count_raw)
-        if isinstance(last_count, dict):
-            last_count = last_count.get('value', 0)
-        no_new_items_streak = 0
-        max_scrolls = 15
-
-        # 現在の取得率を計算
-        if self.total_items > 0:
-            current_rate = (last_count / self.total_items) * 100
-            self.logger.log(f"\n    [現状] 取得率: {current_rate:.1f}% ({last_count}/{self.total_items})")
-            
-        # 巨大ウィンドウの効果を確認
-        self.logger.log("\n    [確認] 超巨大ウィンドウ(1920x15000)での初期表示商品数を検証中...")
-        
-        # 取得結果を評価
-        if last_count >= self.total_items:
-            self.logger.log(f"    🎉🎉 [完全成功] 全{self.total_items}商品を取得完了！")
-            self.logger.log("    [結論] 100%の商品取得に成功しました！")
-            return
-        elif last_count > 144:
-            self.logger.log(f"    🎉 [大成功] 巨大ウィンドウにより{last_count}商品を取得！")
-            self.logger.log(f"    [進捗] 前回の144商品から{last_count - 144}商品増加")
-            self.logger.log("    [結論] ウィンドウサイズ15000px戦略がさらに有効でした。")
-            return
-        elif last_count > 96:
-            self.logger.log(f"    ✅ [成功] 巨大ウィンドウにより{last_count}商品を取得")
-            self.logger.log("    [結論] ウィンドウサイズ拡大戦略が有効でした。")
-            return
-        
-        # 96商品のままの場合
-        self.logger.log("\n    [分析結果] 巨大ウィンドウでも96商品が上限:")
-        self.logger.log("      - エルメスサイトは表示領域に関わらず96商品までしか初期ロードしない")
-        self.logger.log("      - 無限スクロール: JavaScript/bot検知により無効化")
-        self.logger.log("\n    [結論] ウィンドウサイズ拡大でも96商品が取得上限です。")
-        
-        return  # スクロール試行をスキップ
-        
-        for i in range(max_scrolls):
-            scroll_attempt = i + 1
-            self.logger.log(f"\n      --- スクロール試行 {scroll_attempt}/{max_scrolls} ---")
-
-            # [実行] nodriverのscroll_downメソッドを使用
-            self.logger.log("        [実行] nodriverのscroll_downメソッドで物理的なスクロールを実行します。")
-            
-            # スクロール前の状態を取得
-            before_state = await tab.evaluate('''
-                ({
-                    scrollY: window.scrollY,
-                    itemCount: document.querySelectorAll('h-grid-result-item').length
-                })
-            ''')
-            before_state = normalize_nodriver_result(before_state)
-            
-            # スクロール実行（複数の方法を試行）
-            try:
-                # 方法1: nodriverのscroll_downメソッドを試行
-                await tab.scroll_down(800)
-                await asyncio.sleep(0.5)
-            except Exception as e:
-                self.logger.log(f"        [情報] scroll_downメソッドが使用できません: {e}")
-            
-            # 方法2: JavaScriptでの確実なスクロール（フォールバック）
-            # ページ最下部付近までジャンプ
-            scroll_js_result = await tab.evaluate('''
-                (() => {
-                    const beforeY = window.scrollY;
-                    const viewHeight = window.innerHeight;
-                    const pageHeight = document.body.scrollHeight;
-                    
-                    // 現在位置から1画面分スクロール
-                    const targetY = Math.min(beforeY + viewHeight * 0.8, pageHeight - viewHeight);
-                    
-                    // 即座にジャンプ（アニメーションなし）
-                    window.scrollTo(0, targetY);
-                    
-                    return {
-                        before: beforeY,
-                        after: window.scrollY,
-                        pageHeight: pageHeight,
-                        scrolled: window.scrollY > beforeY
-                    };
-                })()
-            ''')
-            
-            scroll_result = normalize_nodriver_result(scroll_js_result)
-            if scroll_result.get('scrolled'):
-                self.logger.log(f"        [成功] JavaScriptスクロール: {scroll_result.get('before', 0)} → {scroll_result.get('after', 0)}")
-            
-            # 追加の待機
-            await asyncio.sleep(1)
-            
-            # スクロール後の状態を取得
-            after_state = await tab.evaluate('''
-                ({
-                    scrollY: window.scrollY,
-                    itemCount: document.querySelectorAll('h-grid-result-item').length
-                })
-            ''')
-            after_state = normalize_nodriver_result(after_state)
-            
-            # スクロール結果をログ
-            if after_state.get('scrollY', 0) > before_state.get('scrollY', 0):
-                self.logger.log(f"        [成功] スクロール実行: {before_state.get('scrollY', 0)} → {after_state.get('scrollY', 0)}")
-            else:
-                self.logger.log(f"        [警告] スクロール位置が変わりませんでした: {after_state.get('scrollY', 0)}")
-            
-            self.logger.log("        [待機] 自動読み込みとレンダリングを待機中 (8秒)...")
-            await asyncio.sleep(8)
-
-            # [検証] スクロール後の状態を分析
-            current_state_raw = await tab.evaluate('''
-                ({
-                    itemCount: document.querySelectorAll('h-grid-result-item').length,
-                    scrollY: window.scrollY,
-                    scrollHeight: document.body.scrollHeight
-                })
-            ''')
-            current_state = normalize_nodriver_result(current_state_raw)
-            current_count = current_state.get('itemCount', 0)
-            
-            self.logger.log(f"        [検証] 現在の商品数: {current_count}個")
-            self.logger.log(f"        [検証] スクロール位置: {current_state.get('scrollY', 'N/A')} / {current_state.get('scrollHeight', 'N/A')}")
-
-            # [判断] と [終了条件]
-            if current_count > last_count:
-                self.logger.log(f"        [判断] ✅ 新規商品 {current_count - last_count}個を検出しました！")
-                no_new_items_streak = 0
-            else:
-                no_new_items_streak += 1
-                self.logger.log(f"        [判断] ⏸️ 新規商品はありませんでした。(連続 {no_new_items_streak}回)")
-            
-            if no_new_items_streak >= 3:
-                self.logger.log("\n      [終了] 3回連続で新規商品がなかったため、全件取得完了と判断します。")
-                break
-            
-            if self.total_items > 0 and current_count >= self.total_items:
-                self.logger.log(f"\n      [終了] 宣言されている総商品数 ({self.total_items}個) に到達しました。")
-                break
-
-            last_count = current_count
-            if scroll_attempt == max_scrolls:
-                self.logger.log(f"\n      [警告] 最大スクロール回数 ({max_scrolls}回) に到達しました。")
-        
-        # 最終結果サマリー（変更なし）
-        final_count_raw = await tab.evaluate("document.querySelectorAll('h-grid-result-item').length")
-        final_count = normalize_nodriver_result(final_count_raw)
-        if isinstance(final_count, dict):
-            final_count = final_count.get('value', 0)
-        self.logger.log(f"\n    [最終結果] スクロール処理完了。最終的な取得見込み商品数: {final_count}個")
-    
-    async def _click_hermes_button(self, tab, selector):
-        """エルメスボタンの確実クリック"""
-        try:
-            # nodriverでボタンを見つけてクリック
-            self.logger.log("           🔍 ボタンを検索中...")
-            
-            # 方法1: wait_forを使用してボタンを取得
-            try:
-                button = await tab.wait_for(selector, timeout=5000)
-                if button:
-                    self.logger.log("           🎯 ボタンを発見（wait_for）")
-                    
-                    # スクロールしてボタンを表示
+                if button and is_visible:
+                    self.logger.log("      [成功] ボタンを発見。クリックを実行します。")
                     await tab.evaluate(f'''
-                        const button = document.querySelector('{selector}');
-                        if (button) {{
-                            button.scrollIntoView({{behavior: 'smooth', block: 'center'}});
-                        }}
+                        document.querySelector('{button_selector}').scrollIntoView({{behavior: 'smooth', block: 'center'}});
                     ''')
                     await asyncio.sleep(1)
-                    
-                    # ボタンをクリック
                     await button.click()
-                    self.logger.log("           ✅ ボタンクリック実行（nodriver API）")
-                    
-                    # 読み込み待機
-                    await asyncio.sleep(5)
-                    return True
-            except:
-                # 方法1が失敗した場合、方法2を試す
-                self.logger.log("           ⚠️ wait_forメソッドが失敗、代替方法を試行")
+                    self.logger.log("      [待機] クリック後の商品読み込み待機中（10秒）...")
+                    await asyncio.sleep(10)
+        except Exception:
+            self.logger.log("      [情報] ボタン処理でタイムアウトまたはエラー。")
+        
+        # --- フェーズ2: 商品数に応じた段階的スクロール処理 ---
+        self.logger.log("\n    --- フェーズ2: 商品数に応じた段階的スクロール処理 ---")
+        
+        # 総商品数に基づいてスクロール回数を決定
+        total_products = getattr(self, 'total_items', 0)
+        if total_products <= 96:
+            self.logger.log(f"      [スキップ] 総商品数が{total_products}個のため、スクロール不要")
+            return
+        
+        # 48の倍数で必要なスクロール回数を計算
+        scroll_rounds = max(1, (total_products - 48) // 48)
+        self.logger.log(f"      [計画] 総商品数{total_products}個に対して{scroll_rounds}回のスクロールを実行")
+        
+        # 固定値スクロール戦略（7500pxずつ95%まで）
+        self.logger.log(f"\n      [スクロール戦略] 7500pxずつ固定スクロール（95%到達まで）")
+        
+        scroll_position = 0
+        scroll_increment = 7500
+        scroll_count = 0
+        previous_count = 0
+        
+        while True:
+            scroll_count += 1
+            scroll_position += scroll_increment
             
-            # 方法2: evaluateでクリック
-            result = await tab.evaluate(f'''
-                (async () => {{
-                    const button = document.querySelector('{selector}');
-                    if (!button) return {{success: false, error: 'Button not found'}};
-                    
-                    // ボタンの状態確認
-                    const isVisible = button.offsetParent !== null;
-                    const isDisabled = button.disabled || button.getAttribute('aria-disabled') === 'true';
-                    
-                    if (!isVisible) return {{success: false, error: 'Button not visible'}};
-                    if (isDisabled) return {{success: false, error: 'Button disabled'}};
-                    
-                    // スクロール
-                    button.scrollIntoView({{behavior: 'smooth', block: 'center'}});
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                    
-                    // クリック
-                    button.click();
-                    
-                    return {{success: true}};
+            self.logger.log(f"\n      [スクロール {scroll_count}] {scroll_position}px地点へ")
+            
+            scroll_result = await tab.evaluate(f'''
+                (() => {{
+                    const before = window.scrollY;
+                    window.scrollTo(0, {scroll_position});
+                    const after = window.scrollY;
+                    const itemCount = document.querySelectorAll('h-grid-result-item').length;
+                    const bodyHeight = document.body.scrollHeight;
+                    return {{
+                        before: before,
+                        after: after,
+                        itemCount: itemCount,
+                        bodyHeight: bodyHeight,
+                        reachedBottom: after + window.innerHeight >= bodyHeight
+                    }};
                 }})()
             ''')
             
-            result_normalized = normalize_nodriver_result(result)
-            if safe_get(result_normalized, 'success'):
-                self.logger.log("           ✅ ボタンクリック実行（evaluate）")
-                await asyncio.sleep(5)
-                return True
-            else:
-                error_msg = safe_get(result_normalized, 'error', 'Unknown error')
-                self.logger.log(f"           ❌ クリック失敗: {error_msg}")
-                return False
+            result = normalize_nodriver_result(scroll_result)
+            current_count = result.get('itemCount', 0)
+            self.logger.log(f"      スクロール位置: {result.get('before', 0)} → {result.get('after', 0)}")
+            self.logger.log(f"      現在の商品数: {current_count}個")
             
-        except Exception as e:
-            self.logger.log(f"           💥 クリック処理エラー: {e}")
-            import traceback
-            self.logger.log(traceback.format_exc())
-            return False
-    
+            # 取得率を計算
+            if self.total_items > 0:
+                current_rate = (current_count / self.total_items) * 100
+                self.logger.log(f"      取得率: {current_rate:.1f}%")
+                
+                # 95%以上到達したら成功判定
+                if current_rate >= 95.0:
+                    self.logger.log(f"      ✅ {current_rate:.1f}%到達！成功判定（{current_count}/{self.total_items}商品）")
+                    break
+            
+            # ページ最下部に到達したら終了
+            if result.get('reachedBottom', False):
+                self.logger.log(f"      ⚠️ ページ最下部に到達（商品数: {current_count}個）")
+                break
+            
+            # 商品数が増えなくなったらもう少し待機
+            if current_count == previous_count:
+                self.logger.log(f"      [追加待機] 商品数が増えないため5秒待機...")
+                await asyncio.sleep(5)
+            else:
+                await asyncio.sleep(3)
+            
+            previous_count = current_count
+            
+            # 安全のため最大10回まで
+            if scroll_count >= 10:
+                self.logger.log(f"      ⚠️ 最大スクロール回数に到達")
+                break
+        
+        
+        self.logger.log("      [待機] 最終読み込み待機中（10秒）...")
+        await asyncio.sleep(10)
+        
+        # 読み込み状況を確認
+        item_count = await tab.evaluate("document.querySelectorAll('h-grid-result-item').length")
+        count = normalize_nodriver_result(item_count)
+        if isinstance(count, dict):
+            count = count.get('value', 0)
+        self.logger.log(f"      [確認] 最終的な商品数: {count}個")
+        
+        # 85%以上だが95%に達していない場合、追加スクロールを試行
+        if self.total_items > 0 and count < self.total_items and count / self.total_items >= 0.85 and count / self.total_items < 0.95:
+            self.logger.log(f"      [追加処理] 85%以上95%未満（{count}/{self.total_items}）- 追加スクロール実行")
+
+            # 最下部で微小なスクロールを複数回実行
+            for i in range(3):
+                await tab.evaluate('''
+                    window.scrollTo(0, document.body.scrollHeight - 100);
+                ''')
+                await asyncio.sleep(2)
+                await tab.evaluate('''
+                    window.scrollTo(0, document.body.scrollHeight);
+                ''')
+                await asyncio.sleep(3)
+            
+            # 最終確認
+            final_count = await tab.evaluate("document.querySelectorAll('h-grid-result-item').length")
+            final_count = normalize_nodriver_result(final_count)
+            if isinstance(final_count, dict):
+                final_count = final_count.get('value', 0)
+            self.logger.log(f"      [最終確認] 追加スクロール後の商品数: {final_count}個")
     
     async def _download_html(self, tab):
         """HTMLをダウンロード"""
@@ -686,155 +538,6 @@ class HermesScraper:
         except Exception as e:
             self.logger.log(f"    ❌ HTMLダウンロードエラー: {e}")
             return False
-    
-    async def _check_loading_animation(self, tab):
-        """ローディングアニメーション（3つのドット）を検出"""
-        self.logger.log(f"        🔎 ローディングアニメーション検出開始...")
-        try:
-            # ローディングインジケーターの一般的なセレクター
-            loading_selectors = [
-                '.loading',
-                '.loader',
-                '[class*="loading"]',
-                '[class*="loader"]',
-                '.dots',
-                '.spinner',
-                '[aria-label*="loading"]',
-                '[aria-label*="Loading"]',
-                'div[class*="dot"]',
-                # エルメス固有の可能性
-                'h-loading',
-                '[class*="load-more"]',
-                '.progress'
-            ]
-            
-            for selector in loading_selectors:
-                try:
-                    loading_exists = await tab.evaluate(f'''
-                        (function() {{
-                            const elem = document.querySelector('{selector}');
-                            if (elem) {{
-                                const isVisible = elem.offsetParent !== null;
-                                const style = window.getComputedStyle(elem);
-                                const isDisplayed = style.display !== 'none' && style.visibility !== 'hidden';
-                                return isVisible && isDisplayed;
-                            }}
-                            return false;
-                        }})()
-                    ''')
-                    
-                    if normalize_nodriver_result(loading_exists):
-                        self.logger.log(f"        🔍 ローディング要素検出: {selector}")
-                        return True
-                except:
-                    continue
-            
-            # アニメーション中の要素を検出（より汎用的）
-            animating_elements = await tab.evaluate('''
-                (function() {
-                    const elements = document.querySelectorAll('*');
-                    for (let elem of elements) {
-                        const style = window.getComputedStyle(elem);
-                        if (style.animationName !== 'none' || style.transition !== 'none') {
-                            const rect = elem.getBoundingClientRect();
-                            // 画面内に表示されているアニメーション要素
-                            if (rect.top >= 0 && rect.bottom <= window.innerHeight) {
-                                return true;
-                            }
-                        }
-                    }
-                    return false;
-                })()
-            ''')
-            
-            result = normalize_nodriver_result(animating_elements)
-            if not result:
-                self.logger.log(f"        ❌ ローディングアニメーション検出なし")
-            return result
-            
-        except Exception as e:
-            self.logger.log(f"        ⚠️ ローディング検出エラー: {e}")
-            return False
-    
-    async def _detect_dom_changes(self, tab, wait_time=2):
-        """DOM変更を検出（新商品読み込みの間接的な検出）"""
-        try:
-            # 現在のDOM状態を記録
-            initial_state = await tab.evaluate('''
-                (function() {
-                    const items = document.querySelectorAll('h-grid-result-item');
-                    return {
-                        itemCount: items.length,
-                        lastItemId: items.length > 0 ? items[items.length - 1].getAttribute('id') || 'no-id' : null,
-                        bodyHeight: document.body.scrollHeight
-                    };
-                })()
-            ''')
-            
-            await asyncio.sleep(wait_time)
-            
-            # 変更後の状態を確認
-            final_state = await tab.evaluate('''
-                (function() {
-                    const items = document.querySelectorAll('h-grid-result-item');
-                    return {
-                        itemCount: items.length,
-                        lastItemId: items.length > 0 ? items[items.length - 1].getAttribute('id') || 'no-id' : null,
-                        bodyHeight: document.body.scrollHeight
-                    };
-                })()
-            ''')
-            
-            initial = normalize_nodriver_result(initial_state)
-            final = normalize_nodriver_result(final_state)
-            
-            changes_detected = (
-                safe_get(initial, 'itemCount') != safe_get(final, 'itemCount') or
-                safe_get(initial, 'lastItemId') != safe_get(final, 'lastItemId') or
-                safe_get(initial, 'bodyHeight') != safe_get(final, 'bodyHeight')
-            )
-            
-            if changes_detected:
-                self.logger.log(f"        📊 DOM変更検出: アイテム数 {safe_get(initial, 'itemCount')} → {safe_get(final, 'itemCount')}")
-            
-            return changes_detected
-            
-        except Exception as e:
-            self.logger.log(f"        ⚠️ DOM変更検出エラー: {e}")
-            return False
-    
-    async def _save_html_snapshot(self, tab, filename, label):
-        """現在のHTMLスナップショットを保存"""
-        try:
-            self.logger.log(f"    📸 {label}のHTMLを保存中...")
-            
-            # 完全なHTMLを取得
-            html_raw = await tab.evaluate('document.documentElement.outerHTML')
-            html_content = normalize_nodriver_result(html_raw)
-            if isinstance(html_content, dict):
-                html_content = html_content.get('html', html_content.get('value', str(html_raw)))
-            
-            # HTMLを保存
-            with open(filename, 'w', encoding='utf-8') as f:
-                f.write(html_content)
-            
-            file_size = len(html_content.encode('utf-8'))
-            self.logger.log(f"    ✅ {label}HTML保存完了: {filename} ({file_size/1024:.1f} KB)")
-            
-            # 商品数をカウント
-            from bs4 import BeautifulSoup
-            soup = BeautifulSoup(html_content, 'lxml')
-            items = soup.find_all('h-grid-result-item')
-            unique_urls = set()
-            for item in items:
-                link = item.find('a')
-                if link and link.get('href'):
-                    unique_urls.add(link['href'])
-            
-            self.logger.log(f"    📊 {label}商品数: {len(unique_urls)}個")
-            
-        except Exception as e:
-            self.logger.log(f"    ❌ {label}HTML保存エラー: {e}")
     
     def get_results(self):
         """実行結果のログを取得"""
