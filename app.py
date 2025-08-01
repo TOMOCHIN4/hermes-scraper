@@ -620,13 +620,231 @@ def test_hermes_site_scraping():
                                 log_and_append(f"      ❌ 全商品読み込みエラー: {e}")
                                 return False
                         
-                        # Load Moreで全商品を読み込む
-                        await load_all_products_with_monitoring(tab)
+                        # スクロールとLoad Moreボタンの高度な組み合わせで全商品を読み込む
+                        async def load_all_products_advanced(tab):
+                            """高度なスクロールとDOM監視を組み合わせた全商品読み込み"""
+                            log_output = ""
+                            
+                            log_output += "\n=== 高度な無限スクロール処理開始 ==="
+                            
+                            # DOM安定性を待つヘルパー関数
+                            async def wait_for_dom_stability(tab, timeout=2000, check_interval=100):
+                                """DOM が安定するまで待機"""
+                                await tab.evaluate(f'''
+                                    new Promise((resolve) => {{
+                                        let lastChangeTime = Date.now();
+                                        let observer = new MutationObserver(() => {{
+                                            lastChangeTime = Date.now();
+                                        }});
+                                        
+                                        observer.observe(document.body, {{
+                                            childList: true,
+                                            subtree: true
+                                        }});
+                                        
+                                        let checkInterval = setInterval(() => {{
+                                            if (Date.now() - lastChangeTime > {timeout}) {{
+                                                clearInterval(checkInterval);
+                                                observer.disconnect();
+                                                resolve();
+                                            }}
+                                        }}, {check_interval});
+                                    }})
+                                ''')
+                            
+                            # 初期商品数を取得
+                            initial_count_raw = await tab.evaluate('document.querySelectorAll("h-grid-result-item").length')
+                            initial_count = normalize_nodriver_result(initial_count_raw)
+                            if isinstance(initial_count, dict):
+                                initial_count = initial_count.get('value', 0)
+                            log_output += f"\n初期商品数: {initial_count}個"
+                            
+                            # 総商品数を取得（改善版）
+                            total_products_raw = await tab.evaluate('''
+                                (function() {
+                                    // 複数の方法で総商品数を探す
+                                    
+                                    // 方法1: "168 アイテム" のパターンを探す
+                                    const pageText = document.body.textContent;
+                                    const itemMatch = pageText.match(/(\\d+)\\s*(?:​\\s*)?アイテム/);
+                                    if (itemMatch && parseInt(itemMatch[1]) > 48) {  // 48より大きい数字を総数と判断
+                                        console.log('Total products found:', itemMatch[1]);
+                                        return parseInt(itemMatch[1]);
+                                    }
+                                    
+                                    // 方法2: data-testid属性を使用
+                                    const totalElement = document.querySelector('[data-testid="number-current-result"]');
+                                    if (totalElement) {
+                                        const text = totalElement.textContent;
+                                        const match = text.match(/(\\d+)/);
+                                        if (match) {
+                                            console.log('Total products from data-testid:', match[1]);
+                                            return parseInt(match[1]);
+                                        }
+                                    }
+                                    
+                                    // 方法3: 検索結果のパターン
+                                    const patterns = [
+                                        /検索結果.*?(\\d+)/,
+                                        /\\((\\d+)\\)/,
+                                        /(\\d+)\\s*items?/i
+                                    ];
+                                    
+                                    for (let pattern of patterns) {
+                                        const match = pageText.match(pattern);
+                                        if (match && parseInt(match[1]) > 0) {
+                                            console.log('Total products from pattern:', match[1]);
+                                            return parseInt(match[1]);
+                                        }
+                                    }
+                                    
+                                    console.log('Could not find total products count');
+                                    return 0;
+                                })()
+                            ''')
+                            total_products = normalize_nodriver_result(total_products_raw)
+                            if isinstance(total_products, dict):
+                                total_products = total_products.get('value', 0)
+                            log_output += f"\n総商品数: {total_products}個"
+                            
+                            # 既に全商品が表示されている場合
+                            if initial_count >= total_products and total_products > 0:
+                                log_output += f"\n✅ 既に全商品が表示されています"
+                                log_and_append(log_output)
+                                return True
+                            
+                            # スクロールとLoad Moreボタンのクリックを組み合わせた実装
+                            previous_product_count = 0
+                            scroll_attempts = 0
+                            max_scroll_attempts = 30  # 最大スクロール試行回数
+                            no_change_count = 0  # 変化がない回数をカウント
+                            
+                            while scroll_attempts < max_scroll_attempts:
+                                # 現在の商品数を取得
+                                current_products = await tab.select_all('div.h-grid-result-item')
+                                current_count = len(current_products)
+                                log_output += f"\n現在の商品数: {current_count}"
+                                
+                                # 商品数が増えていない場合
+                                if current_count == previous_product_count:
+                                    no_change_count += 1
+                                    
+                                    # 3回連続で変化がない場合はLoad Moreボタンを探す
+                                    if no_change_count >= 3:
+                                        try:
+                                            load_more_button = await tab.select('button[data-testid="Load more items"]')
+                                            if load_more_button:
+                                                log_output += "\n'Load More'ボタンを発見！クリックします..."
+                                                await load_more_button.click()
+                                                await asyncio.sleep(3)  # クリック後の読み込み待機
+                                                
+                                                # DOM安定性を待つ
+                                                await wait_for_dom_stability(tab)
+                                                
+                                                # クリック後の商品数確認
+                                                new_products = await tab.select_all('div.h-grid-result-item')
+                                                log_output += f"\nボタンクリック後の商品数: {len(new_products)}"
+                                                
+                                                # ボタンクリックで新商品が読み込まれた場合は継続
+                                                if len(new_products) > current_count:
+                                                    previous_product_count = len(new_products)
+                                                    no_change_count = 0
+                                                    continue
+                                        except Exception as e:
+                                            log_output += f"\nLoad Moreボタンの処理でエラー: {str(e)}"
+                                        
+                                        # ボタンがない、またはクリックしても増えない場合は終了
+                                        log_output += "\n新しい商品が読み込まれなくなりました。"
+                                        break
+                                else:
+                                    # 商品数が増えている場合はカウントをリセット
+                                    no_change_count = 0
+                                    previous_product_count = current_count
+                                
+                                # 「サービス」セクションが見えるまでスクロール
+                                # これによりリストの最後まで確実にスクロール
+                                try:
+                                    await tab.evaluate('''
+                                        // サービスセクションを探す
+                                        const serviceSection = Array.from(document.querySelectorAll('*')).find(
+                                            el => el.textContent && el.textContent.includes('サービス＋')
+                                        );
+                                        
+                                        if (serviceSection) {
+                                            // サービスセクションが画面中央に来るようにスクロール
+                                            serviceSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                        } else {
+                                            // 見つからない場合は通常のスクロール
+                                            window.scrollTo(0, document.body.scrollHeight);
+                                        }
+                                    ''')
+                                except:
+                                    # エラーの場合は通常のスクロール
+                                    await tab.evaluate('window.scrollTo(0, document.body.scrollHeight);')
+                                
+                                # スクロール後の待機（動的読み込みを待つ）
+                                await asyncio.sleep(3)  # 少し長めに待機
+                                
+                                # DOM安定性を確認
+                                await wait_for_dom_stability(tab, timeout=1000)
+                                
+                                scroll_attempts += 1
+                                
+                                # 進捗表示
+                                if scroll_attempts % 5 == 0:
+                                    log_output += f"\nスクロール進捗: {scroll_attempts}/{max_scroll_attempts}"
+                            
+                            # 最終的な商品数を確認
+                            final_products = await tab.select_all('div.h-grid-result-item')
+                            log_output += f"\n\n=== 最終結果 ==="
+                            log_output += f"\n読み込まれた商品数: {len(final_products)}個"
+                            
+                            # 追加の確認: ネットワークアイドル状態を待つ
+                            log_output += "\n\nネットワークアイドル状態を待機中..."
+                            await tab.evaluate('''
+                                new Promise((resolve) => {
+                                    let pendingRequests = 0;
+                                    const checkNetworkIdle = () => {
+                                        if (pendingRequests === 0) {
+                                            setTimeout(resolve, 1000);  // 1秒間リクエストがなければ完了
+                                        }
+                                    };
+                                    
+                                    // Fetch APIのインターセプト
+                                    const originalFetch = window.fetch;
+                                    window.fetch = function(...args) {
+                                        pendingRequests++;
+                                        return originalFetch.apply(this, args).finally(() => {
+                                            pendingRequests--;
+                                            checkNetworkIdle();
+                                        });
+                                    };
+                                    
+                                    // 初回チェック
+                                    checkNetworkIdle();
+                                })
+                            ''')
+                            
+                            # 最終確認
+                            final_products_after_idle = await tab.select_all('div.h-grid-result-item')
+                            if len(final_products_after_idle) > len(final_products):
+                                log_output += f"\nネットワークアイドル後に追加商品を検出: {len(final_products_after_idle)}個"
+                                final_products = final_products_after_idle
+                            
+                            log_output += f"\n\n最終商品数: {len(final_products)}個"
+                            if total_products > 0:
+                                log_output += f" (総商品数: {total_products}個)"
+                            
+                            log_and_append(log_output)
+                            return True
+                        
+                        # 高度な全商品読み込み処理を実行
+                        await load_all_products_advanced(tab)
                         
                         # ページの完全なHTMLを取得（SaveAs相当）
                         # まずページが完全に読み込まれるまで待機
                         log_and_append("      ⏳ 最終レンダリング待機中...")
-                        await asyncio.sleep(3)  # 追加待機
+                        await asyncio.sleep(5)  # しっかり待機
                         
                         # JavaScriptを使用してレンダリング後のHTMLを取得
                         try:
