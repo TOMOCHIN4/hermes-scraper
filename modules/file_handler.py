@@ -15,9 +15,17 @@ class FileHandler:
         """ダウンロード可能なファイルのリストを取得"""
         files = []
         
-        # HTMLファイル
+        # HTMLファイル（メイン + スナップショット）
         html_files = glob.glob("hermes_page*.html")
         files.extend(html_files)
+        
+        # スナップショットファイル
+        snapshot_files = glob.glob("snapshot_*.html")
+        files.extend(snapshot_files)
+        
+        # その他のHTMLファイル
+        other_html = glob.glob("before_click.html") + glob.glob("after_click.html")
+        files.extend(other_html)
         
         # JSONファイル
         json_files = glob.glob("hermes_products*.json")
