@@ -36,7 +36,8 @@ class HermesScraper:
             '--disable-extensions',
             '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             '--window-size=1920,15000',  # 超巨大縦長ウィンドウ（高さ15000ピクセル）
-            '--start-maximized'
+            '--start-maximized',
+            '--incognito'  # プライベートブラウズモード（シークレットモード）を有効化
         ]
         
         self.browser = await nd.start(
@@ -47,6 +48,7 @@ class HermesScraper:
         
         self.logger.log(f"    ✅ Browser開始成功: {type(self.browser)}")
         self.logger.log(f"    📐 ウィンドウサイズ: 1920x15000 (超巨大縦長設定)")
+        self.logger.log(f"    🔒 プライベートブラウズモード: 有効")
         self.logger.log("")
     
     async def close_browser(self):
