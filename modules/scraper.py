@@ -15,6 +15,7 @@ class HermesScraper:
         self.logger = create_logger()
         self.browser = None
         self.results = []
+        self.total_items = 0
     
     async def start_browser(self):
         """ブラウザを起動"""
@@ -105,6 +106,66 @@ class HermesScraper:
         
         # 基本待機
         await asyncio.sleep(10)
+        
+        # 総商品数を取得
+        try:
+            total_count_raw = await tab.evaluate('''
+                (function() {
+                    // 複数のパターンで総商品数を検索
+                    const patterns = [
+                        /(\d+)\s*アイテム/,
+                        /(\d+)\s*items?/i,
+                        /(\d+)\s*製品/,
+                        /(\d+)\s*商品/,
+                        /(\d+)\s*results?/i
+                    ];
+                    
+                    // ページ全体のテキストから検索
+                    const pageText = document.body.innerText || document.body.textContent || '';
+                    
+                    for (let pattern of patterns) {
+                        const match = pageText.match(pattern);
+                        if (match && match[1]) {
+                            return {
+                                found: true,
+                                count: parseInt(match[1]),
+                                text: match[0]
+                            };
+                        }
+                    }
+                    
+                    // h-total-result要素から取得を試行
+                    const totalElement = document.querySelector('h-total-result, .total-result, [class*="total"]');
+                    if (totalElement) {
+                        const text = totalElement.innerText || totalElement.textContent || '';
+                        for (let pattern of patterns) {
+                            const match = text.match(pattern);
+                            if (match && match[1]) {
+                                return {
+                                    found: true,
+                                    count: parseInt(match[1]),
+                                    text: match[0],
+                                    element: 'h-total-result'
+                                };
+                            }
+                        }
+                    }
+                    
+                    return { found: false };
+                })()
+            ''')
+            
+            total_count_info = normalize_nodriver_result(total_count_raw)
+            if safe_get(total_count_info, 'found'):
+                self.total_items = safe_get(total_count_info, 'count', 0)
+                self.logger.log(f"    📊 総商品数を検出: {self.total_items} ({safe_get(total_count_info, 'text')})")
+                if safe_get(total_count_info, 'element'):
+                    self.logger.log(f"    📍 取得元: {safe_get(total_count_info, 'element')}要素")
+            else:
+                self.logger.log(f"    ⚠️ 総商品数を検出できませんでした")
+                
+        except Exception as e:
+            self.logger.log(f"    ⚠️ 総商品数取得エラー: {e}")
         
         # 商品コンテナ要素の出現を待機
         container_selectors = [
@@ -315,8 +376,16 @@ class HermesScraper:
                 if link and link.get('href'):
                     unique_urls.add(link['href'])
             
-            self.logger.log(f"    📊 HTML内の商品タグ数: {len(items)}（総数）")
+            # 商品タグ数を直接カウント（元の実装通り）
+            tag_count = full_html.count('h-grid-result-item')
+            
+            self.logger.log(f"    📊 HTML内の商品タグ数: {tag_count}（総数）")
             self.logger.log(f"    📊 ユニーク商品数: {len(unique_urls)}")
+            
+            # 総商品数との比較
+            if hasattr(self, 'total_items') and self.total_items > 0:
+                if len(unique_urls) < self.total_items:
+                    self.logger.log(f"    ⚠️ 取得率: {len(unique_urls)}/{self.total_items} ({len(unique_urls)/self.total_items*100:.1f}%)")
             
             return True
             
