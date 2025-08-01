@@ -352,48 +352,58 @@ class HermesScraper:
             scroll_attempt = i + 1
             self.logger.log(f"\n      --- スクロール試行 {scroll_attempt}/{max_scrolls} ---")
 
-            # [実行] JavaScriptでより確実なスクロールを実行
-            self.logger.log("        [実行] JavaScriptで確実なページダウンスクロールを実行します。")
-            # エルメスサイトに最適化されたスクロール処理
-            await tab.evaluate('''
+            # [実行] 最下部の商品要素へ直接ジャンプ
+            self.logger.log("        [実行] 最下部の商品へ直接ジャンプしてスクロールをトリガーします。")
+            scroll_result = await tab.evaluate('''
                 (async () => {
                     // 現在のスクロール位置を記録
                     const beforeScroll = window.scrollY;
+                    const beforeCount = document.querySelectorAll('h-grid-result-item').length;
                     
-                    // 複数の方法でスクロールを試行
-                    // 方法1: scrollByを使った段階的スクロール
-                    const viewportHeight = window.innerHeight;
-                    const scrollStep = viewportHeight / 5;
-                    
-                    for (let i = 0; i < 5; i++) {
-                        window.scrollBy({
-                            top: scrollStep,
-                            behavior: 'smooth'
-                        });
-                        await new Promise(resolve => setTimeout(resolve, 200));
+                    // 最下部の商品要素を取得
+                    const items = document.querySelectorAll('h-grid-result-item');
+                    if (items.length === 0) {
+                        return {
+                            success: false,
+                            message: "商品要素が見つかりません"
+                        };
                     }
                     
-                    // 方法2: もし方法1で動かなかった場合、document.body.scrollTopを直接操作
-                    if (window.scrollY === beforeScroll) {
-                        document.body.scrollTop += viewportHeight;
-                        document.documentElement.scrollTop += viewportHeight;
-                    }
+                    // 最後から5番目の商品にフォーカス（最下部すぎると読み込みされない可能性）
+                    const targetIndex = Math.max(0, items.length - 5);
+                    const targetItem = items[targetIndex];
                     
-                    // 方法3: それでも動かない場合、最下部の要素にフォーカス
-                    if (window.scrollY === beforeScroll) {
-                        const items = document.querySelectorAll('h-grid-result-item');
-                        if (items.length > 0) {
-                            items[items.length - 1].scrollIntoView({ behavior: 'smooth', block: 'end' });
-                        }
-                    }
+                    // その要素の位置を取得
+                    const rect = targetItem.getBoundingClientRect();
+                    const absoluteTop = window.pageYOffset + rect.top;
                     
+                    // 直接その位置にジャンプ
+                    window.scrollTo({
+                        top: absoluteTop,
+                        behavior: 'instant'  // smoothではなくinstantで即座に移動
+                    });
+                    
+                    // 少し待機してから、さらに少し下にスクロール（読み込みトリガー）
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    
+                    // 画面の高さ分だけ追加でスクロール
+                    window.scrollBy(0, window.innerHeight);
+                    
+                    // 結果を返す
                     return {
+                        success: true,
                         beforeScroll: beforeScroll,
                         afterScroll: window.scrollY,
-                        scrolled: window.scrollY !== beforeScroll
+                        beforeCount: beforeCount,
+                        targetIndex: targetIndex,
+                        scrolled: window.scrollY > beforeScroll
                     };
                 })()
             ''')
+            
+            const_result = normalize_nodriver_result(scroll_result)
+            if const_result.get('scrolled'):
+                self.logger.log(f"        [成功] スクロール実行: {const_result.get('beforeScroll', 0)} → {const_result.get('afterScroll', 0)}")
             
             self.logger.log("        [待機] 自動読み込みとレンダリングを待機中 (8秒)...")
             await asyncio.sleep(8)
