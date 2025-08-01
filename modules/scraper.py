@@ -215,11 +215,11 @@ class HermesScraper:
                     
                     // キーワードリスト（日本語・英語）
                     const keywords = [
-                        // 日本語
-                        'もっと見る', 'もっと表示', '続きを見る', '次へ', '追加',
+                        // 日本語（エルメス固有を追加）
+                        'アイテムをもっと見る', 'もっと見る', 'もっと表示', '続きを見る', '次へ', '追加',
                         'さらに表示', 'すべて表示', '全て表示', 'より多く',
                         // 英語
-                        'load more', 'show more', 'view more', 'see more',
+                        'load more items', 'load more', 'show more', 'view more', 'see more',
                         'next', 'continue', 'expand', 'additional'
                     ];
                     
@@ -439,41 +439,61 @@ class HermesScraper:
                 # Load Moreボタンの詳細な検索とクリック
                 self.logger.log(f"        🔍 Load Moreボタンを検索中...")
                 
-                # ボタンのDOM分析
+                # ボタンのDOM分析（エルメス特化）
                 button_analysis = await tab.evaluate('''
                     (function() {
                         const buttons = Array.from(document.querySelectorAll('button'));
                         const buttonInfo = [];
                         
                         buttons.forEach((btn, index) => {
-                            const text = btn.textContent.trim().toLowerCase();
+                            const text = btn.textContent.trim();
+                            const textLower = text.toLowerCase();
                             const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase();
+                            const dataTestId = btn.getAttribute('data-testid') || '';
                             const classList = btn.className;
                             const isVisible = btn.offsetParent !== null && 
                                              btn.offsetWidth > 0 && 
                                              btn.offsetHeight > 0;
                             const isDisabled = btn.disabled || btn.getAttribute('aria-disabled') === 'true';
                             
+                            // エルメス固有のボタンを優先的に検出
+                            // 1. data-testid="Load more items"
+                            // 2. テキスト: "アイテムをもっと見る"
+                            const isHermesLoadMore = 
+                                dataTestId === 'Load more items' ||
+                                text === 'アイテムをもっと見る' ||
+                                textLower.includes('load more items');
+                            
                             // Load More系のキーワードをチェック
-                            const keywords = ['もっと', 'more', 'load', '表示', 'show', 'view', '続き', 'next'];
+                            const keywords = ['アイテムをもっと見る', 'もっと', 'more', 'load', '表示', 'show', 'view', '続き', 'next'];
                             const hasKeyword = keywords.some(kw => 
-                                text.includes(kw) || 
-                                ariaLabel.includes(kw) || 
-                                classList.toLowerCase().includes(kw)
+                                textLower.includes(kw.toLowerCase()) || 
+                                ariaLabel.includes(kw.toLowerCase()) || 
+                                classList.toLowerCase().includes(kw.toLowerCase()) ||
+                                dataTestId.toLowerCase().includes(kw.toLowerCase())
                             );
                             
-                            if (hasKeyword) {
+                            if (isHermesLoadMore || hasKeyword) {
                                 buttonInfo.push({
                                     index: index,
-                                    text: btn.textContent.trim(),
+                                    text: text,
                                     ariaLabel: btn.getAttribute('aria-label') || '',
+                                    dataTestId: dataTestId,
                                     className: classList,
                                     id: btn.id,
                                     isVisible: isVisible,
                                     isDisabled: isDisabled,
+                                    isHermesLoadMore: isHermesLoadMore,  // エルメスボタンフラグ
                                     rect: btn.getBoundingClientRect()
                                 });
                             }
+                        });
+                        
+                        // エルメス固有のボタンを優先順位でソート
+                        buttonInfo.sort((a, b) => {
+                            if (a.isHermesLoadMore && !b.isHermesLoadMore) return -1;
+                            if (!a.isHermesLoadMore && b.isHermesLoadMore) return 1;
+                            return 0;
                         });
                         
                         return {
@@ -494,9 +514,12 @@ class HermesScraper:
                     self.logger.log(f"        📍 候補{idx+1}:")
                     self.logger.log(f"           - テキスト: '{safe_get(candidate, 'text', '')}'") 
                     self.logger.log(f"           - aria-label: '{safe_get(candidate, 'ariaLabel', '')}'") 
+                    self.logger.log(f"           - data-testid: '{safe_get(candidate, 'dataTestId', '')}'") 
                     self.logger.log(f"           - クラス: {safe_get(candidate, 'className', '')}") 
                     self.logger.log(f"           - 表示状態: {safe_get(candidate, 'isVisible', False)}") 
                     self.logger.log(f"           - 無効状態: {safe_get(candidate, 'isDisabled', False)}")
+                    if safe_get(candidate, 'isHermesLoadMore', False):
+                        self.logger.log(f"           - ⭐ エルメス固有ボタンとして認識")
                 
                 # クリック可能なボタンを見つける
                 clicked = False
