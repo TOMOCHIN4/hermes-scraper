@@ -361,35 +361,47 @@ class HermesScraper:
                 self.logger.log(f"      🎯 サービスセクション検出: '{safe_get(service_section, 'text')}' at {safe_get(service_section, 'position')}px")
             
             # 動的スクロール処理
-            max_scroll_attempts = 5  # スクロール回数を5回に制限
+            max_scroll_attempts = 10  # 無限スクロール対応のため増加
             no_new_items_count = 0
             last_count = initial_count
-            html_snapshot_intervals = [1, 3, 5]  # HTMLスナップショットを保存するスクロール回数
+            html_snapshot_intervals = [1, 3, 5, 7, 9]  # HTMLスナップショットを保存するスクロール回数
             
             for scroll_attempt in range(max_scroll_attempts):
                 self.logger.log(f"      スクロール試行 {scroll_attempt + 1}/{max_scroll_attempts}")
                 
-                # 人間らしいスクロール速度で実行
-                await tab.evaluate('''
-                    // より人間らしいスクロール（ゆっくり、段階的に）
-                    const scrollDistance = window.innerHeight * 0.8;
-                    const scrollDuration = 2000; // 2秒かけてスクロール
-                    const scrollSteps = 20;
-                    const stepDistance = scrollDistance / scrollSteps;
-                    const stepDelay = scrollDuration / scrollSteps;
-                    
-                    let currentStep = 0;
-                    const scrollInterval = setInterval(() => {
-                        window.scrollBy({
-                            top: stepDistance,
+                # 96商品以降は最下部までしっかりスクロール
+                if current_count >= 96:
+                    # 無限スクロールモードでは最下部到達が重要
+                    await tab.evaluate('''
+                        // ページ最下部まで確実にスクロール
+                        window.scrollTo({
+                            top: document.body.scrollHeight,
                             behavior: 'smooth'
                         });
-                        currentStep++;
-                        if (currentStep >= scrollSteps) {
-                            clearInterval(scrollInterval);
-                        }
-                    }, stepDelay);
-                ''')
+                    ''')
+                    await asyncio.sleep(3)  # スクロール完了待機
+                else:
+                    # 通常の人間らしいスクロール
+                    await tab.evaluate('''
+                        // より人間らしいスクロール（ゆっくり、段階的に）
+                        const scrollDistance = window.innerHeight * 0.8;
+                        const scrollDuration = 2000; // 2秒かけてスクロール
+                        const scrollSteps = 20;
+                        const stepDistance = scrollDistance / scrollSteps;
+                        const stepDelay = scrollDuration / scrollSteps;
+                        
+                        let currentStep = 0;
+                        const scrollInterval = setInterval(() => {
+                            window.scrollBy({
+                                top: stepDistance,
+                                behavior: 'smooth'
+                            });
+                            currentStep++;
+                            if (currentStep >= scrollSteps) {
+                                clearInterval(scrollInterval);
+                            }
+                        }, stepDelay);
+                    ''')
                 
                 # スクロール完了待機（2秒）+ 読み込み待機（10秒）
                 await asyncio.sleep(2)  # スクロール完了待機
@@ -452,9 +464,23 @@ class HermesScraper:
                         await self._save_html_snapshot(tab, f'scroll_bottom_reached_{current_count}.html', f'ページ最下部到達_{current_count}個')
                         self._saved_bottom_reached = True
                 
-                # 終了条件（スクロール回数が少ないので早めに判断）
-                if no_new_items_count >= 2:  # 2回連続で新規商品なし
-                    self.logger.log(f"      🏁 スクロール完了: 2回連続で新規商品なし")
+                # 96商品以降は無限スクロールモードになるため、より積極的に待機
+                if current_count >= 96:
+                    self.logger.log(f"        🔄 無限スクロールモード: ローディング待機中...")
+                    
+                    # ローディングアニメーション（3つのドット）を検出
+                    loading_detected = await self._check_loading_animation(tab)
+                    if loading_detected:
+                        self.logger.log(f"        ⏳ ローディングアニメーション検出！新商品読み込み中...")
+                        await asyncio.sleep(5)  # 読み込み完了を待つ
+                        continue
+                
+                # 終了条件（無限スクロールモードでは緩和）
+                if current_count < 96 and no_new_items_count >= 2:  # フェーズ1では2回
+                    self.logger.log(f"      🏁 フェーズ1完了: ボタンクリックフェーズ終了")
+                    break
+                elif current_count >= 96 and no_new_items_count >= 3:  # フェーズ2では3回
+                    self.logger.log(f"      🏁 スクロール完了: 無限スクロールでも新商品なし")
                     await self._save_html_snapshot(tab, f'scroll_final_nomore_{current_count}.html', f'スクロール終了_新商品なし_{current_count}個')
                     break
                 
@@ -715,6 +741,67 @@ class HermesScraper:
             
         except Exception as e:
             self.logger.log(f"    ❌ HTMLダウンロードエラー: {e}")
+            return False
+    
+    async def _check_loading_animation(self, tab):
+        """ローディングアニメーション（3つのドット）を検出"""
+        try:
+            # ローディングインジケーターの一般的なセレクター
+            loading_selectors = [
+                '.loading',
+                '.loader',
+                '[class*="loading"]',
+                '[class*="loader"]',
+                '.dots',
+                '.spinner',
+                '[aria-label*="loading"]',
+                '[aria-label*="Loading"]',
+                'div[class*="dot"]'
+            ]
+            
+            for selector in loading_selectors:
+                try:
+                    loading_exists = await tab.evaluate(f'''
+                        (function() {{
+                            const elem = document.querySelector('{selector}');
+                            if (elem) {{
+                                const isVisible = elem.offsetParent !== null;
+                                const style = window.getComputedStyle(elem);
+                                const isDisplayed = style.display !== 'none' && style.visibility !== 'hidden';
+                                return isVisible && isDisplayed;
+                            }}
+                            return false;
+                        }})()
+                    ''')
+                    
+                    if normalize_nodriver_result(loading_exists):
+                        self.logger.log(f"        🔍 ローディング要素検出: {selector}")
+                        return True
+                except:
+                    continue
+            
+            # アニメーション中の要素を検出（より汎用的）
+            animating_elements = await tab.evaluate('''
+                (function() {
+                    const elements = document.querySelectorAll('*');
+                    for (let elem of elements) {
+                        const style = window.getComputedStyle(elem);
+                        if (style.animationName !== 'none' || style.transition !== 'none') {
+                            const rect = elem.getBoundingClientRect();
+                            // 画面内に表示されているアニメーション要素
+                            if (rect.top >= 0 && rect.bottom <= window.innerHeight) {
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
+                })()
+            ''')
+            
+            return normalize_nodriver_result(animating_elements)
+            
+        except Exception as e:
+            self.logger.log(f"        ⚠️ ローディング検出エラー: {e}")
             return False
     
     async def _save_html_snapshot(self, tab, filename, label):
