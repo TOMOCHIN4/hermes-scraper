@@ -311,13 +311,26 @@ class HermesScraper:
         """ページをスクロールして全商品を読み込む（真の最終突破：DevToolsキー入力）"""
         self.logger.log(f"    📜 **真の最終突破**動的スクロール処理開始 (DevToolsキー入力)")
 
-        # --- フェーズ1: ボタンクリック（変更なし・成功実績あり）---
+        # --- フェーズ1: ボタンクリック（成功実績のあるコード）---
         self.logger.log("\n    --- フェーズ1: 「アイテムをもっと見る」ボタンのクリック試行 ---")
         try:
-            button = await tab.find('button[data-testid="Load more items"]', timeout=7)
-            if button and await button.is_displayed():
+            button_selector = 'button[data-testid="Load more items"]'
+            button = await tab.wait_for(button_selector, timeout=7000)
+            
+            # ボタンの可視性を確認
+            is_visible = await tab.evaluate(f'''
+                (function() {{
+                    const button = document.querySelector('{button_selector}');
+                    return button && button.offsetParent !== null;
+                }})()
+            ''')
+            is_visible = normalize_nodriver_result(is_visible)
+            
+            if button and is_visible:
                 self.logger.log("      [成功] ボタンを発見。クリックを実行します。")
-                await button.scroll_into_view()
+                await tab.evaluate(f'''
+                    document.querySelector('{button_selector}').scrollIntoView({{behavior: 'smooth', block: 'center'}});
+                ''')
                 await asyncio.sleep(1)
                 await button.click()
                 self.logger.log("      [待機] クリック後の商品読み込み待機中（10秒）...")
