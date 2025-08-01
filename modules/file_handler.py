@@ -23,10 +23,13 @@ class FileHandler:
         json_files = glob.glob("hermes_products*.json")
         files.extend(json_files)
         
-        # その他の出力ファイル
-        other_patterns = ["*.csv", "*.txt"]
-        for pattern in other_patterns:
-            files.extend(glob.glob(pattern))
+        # CSVファイル（将来の拡張用）
+        csv_files = glob.glob("hermes_products*.csv")
+        files.extend(csv_files)
+        
+        # 除外すべきファイル
+        exclude_files = {'requirements.txt', 'README.txt', 'Dockerfile.txt'}
+        files = [f for f in files if f not in exclude_files]
         
         # ファイル情報を収集
         file_info = []
