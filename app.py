@@ -28,7 +28,7 @@ def main_process():
         print(message)
         sys.stdout.flush()
     
-    log_and_append("=== Hermes商品情報抽出システム ===")
+    log_and_append("=== Hermes商品情報抽出システム (15000px版) ===")
     log_and_append(f"実行時刻: {datetime.now()}")
     log_and_append("")
     
