@@ -49,10 +49,16 @@ class HermesScraper:
         if self.browser:
             try:
                 self.logger.log("🧹 ブラウザクリーンアップ開始...")
-                await self.browser.stop()
+                # エラーを回避するため、browser.stop()の結果を確認
+                if hasattr(self.browser, 'stop') and callable(self.browser.stop):
+                    stop_result = self.browser.stop()
+                    # awaitableかどうかを確認
+                    if hasattr(stop_result, '__await__'):
+                        await stop_result
                 self.logger.log("✅ ブラウザが正常に終了しました")
             except Exception as e:
-                self.logger.log(f"⚠️ ブラウザ終了エラー: {e}")
+                self.logger.log(f"⚠️ ブラウザ終了時の警告: {e}")
+                # エラーが発生してもプロセスは継続
     
     async def scrape_hermes_site(self, url="https://www.hermes.com/jp/ja/search/?s=%E3%83%90%E3%83%83%E3%82%B0#"):
         """エルメスサイトをスクレイピング"""
@@ -138,15 +144,26 @@ class HermesScraper:
         self.logger.log(f"    📜 高度な動的スクロール処理開始...")
         
         try:
-            # 初期商品数を取得
+            # 初期商品数を取得（重複を考慮）
             initial_count_raw = await tab.evaluate('''
-                document.querySelectorAll('h-grid-result-item').length
+                // 重複を除外してユニークな商品数をカウント
+                (function() {
+                    const items = document.querySelectorAll('h-grid-result-item');
+                    const uniqueUrls = new Set();
+                    items.forEach(item => {
+                        const link = item.querySelector('a');
+                        if (link && link.href) {
+                            uniqueUrls.add(link.href);
+                        }
+                    });
+                    return uniqueUrls.size;
+                })()
             ''')
             initial_count = normalize_nodriver_result(initial_count_raw)
             if isinstance(initial_count, dict):
                 initial_count = initial_count.get('value', 0)
             
-            self.logger.log(f"      初期商品数: {initial_count}")
+            self.logger.log(f"      初期商品数: {initial_count}（ユニーク）")
             
             # スクロール前のサービスセクション目印を検出
             service_section_raw = await tab.evaluate('''
@@ -171,7 +188,7 @@ class HermesScraper:
                 self.logger.log(f"      🎯 サービスセクション検出: '{safe_get(service_section, 'text')}' at {safe_get(service_section, 'position')}px")
             
             # 動的スクロール処理
-            max_scroll_attempts = 20
+            max_scroll_attempts = 10  # 最大試行回数を削減
             no_new_items_count = 0
             last_count = initial_count
             
@@ -189,18 +206,25 @@ class HermesScraper:
                 # DOM安定性待機
                 await asyncio.sleep(1.5)
                 
-                # ネットワークアイドル待機
-                await asyncio.sleep(1)
-                
-                # 現在の商品数を確認
+                # 現在の商品数を確認（ユニーク）
                 current_count_raw = await tab.evaluate('''
-                    document.querySelectorAll('h-grid-result-item').length
+                    (function() {
+                        const items = document.querySelectorAll('h-grid-result-item');
+                        const uniqueUrls = new Set();
+                        items.forEach(item => {
+                            const link = item.querySelector('a');
+                            if (link && link.href) {
+                                uniqueUrls.add(link.href);
+                            }
+                        });
+                        return uniqueUrls.size;
+                    })()
                 ''')
                 current_count = normalize_nodriver_result(current_count_raw)
                 if isinstance(current_count, dict):
                     current_count = current_count.get('value', 0)
                 
-                self.logger.log(f"        現在の商品数: {current_count}")
+                self.logger.log(f"        現在の商品数: {current_count}（ユニーク）")
                 
                 # 新しい商品が読み込まれたかチェック
                 if current_count > last_count:
@@ -227,33 +251,34 @@ class HermesScraper:
                 if at_bottom:
                     self.logger.log(f"        📍 ページ最下部到達")
                 
-                # 終了条件
-                if no_new_items_count >= 3 or at_bottom:
-                    if no_new_items_count >= 3:
-                        self.logger.log(f"      🏁 スクロール完了: 3回連続で新規商品なし")
+                # 終了条件（早期終了）
+                if no_new_items_count >= 2 or at_bottom:  # 2回に削減
+                    if no_new_items_count >= 2:
+                        self.logger.log(f"      🏁 スクロール完了: 2回連続で新規商品なし")
                     break
                 
-                # Load Moreボタンチェック
-                load_more_exists_raw = await tab.evaluate('''
-                    document.querySelector('button[aria-label*="Load"], button[class*="load"], button[data-testid*="load"]') !== null
-                ''')
-                load_more_exists = normalize_nodriver_result(load_more_exists_raw)
-                if isinstance(load_more_exists, dict):
-                    load_more_exists = load_more_exists.get('value', False)
-                
-                if load_more_exists:
-                    self.logger.log(f"        🔘 Load Moreボタン検出")
-                    try:
-                        await tab.evaluate('''
-                            const btn = document.querySelector('button[aria-label*="Load"], button[class*="load"], button[data-testid*="load"]');
-                            if (btn) btn.click();
-                        ''')
-                        self.logger.log(f"        ✅ Load Moreボタンクリック")
-                        await asyncio.sleep(3)
-                    except:
-                        pass
+                # Load Moreボタンチェック（省略可能）
+                if scroll_attempt < 3:  # 最初の3回のみチェック
+                    load_more_exists_raw = await tab.evaluate('''
+                        document.querySelector('button[aria-label*="Load"], button[class*="load"], button[data-testid*="load"]') !== null
+                    ''')
+                    load_more_exists = normalize_nodriver_result(load_more_exists_raw)
+                    if isinstance(load_more_exists, dict):
+                        load_more_exists = load_more_exists.get('value', False)
+                    
+                    if load_more_exists:
+                        self.logger.log(f"        🔘 Load Moreボタン検出")
+                        try:
+                            await tab.evaluate('''
+                                const btn = document.querySelector('button[aria-label*="Load"], button[class*="load"], button[data-testid*="load"]');
+                                if (btn) btn.click();
+                            ''')
+                            self.logger.log(f"        ✅ Load Moreボタンクリック")
+                            await asyncio.sleep(2)
+                        except:
+                            pass
             
-            self.logger.log(f"    ✅ スクロール処理完了: 総商品数 {last_count}")
+            self.logger.log(f"    ✅ スクロール処理完了: 総商品数 {last_count}（ユニーク）")
             
         except Exception as scroll_error:
             self.logger.log(f"    ⚠️ スクロールエラー: {scroll_error}")
@@ -280,9 +305,18 @@ class HermesScraper:
             self.logger.log(f"    ✅ HTMLファイル保存完了: {filename}")
             self.logger.log(f"    📁 ファイルサイズ: {file_size:,} bytes ({file_size/1024:.1f} KB)")
             
-            # 商品数の確認
-            product_count = full_html.count('h-grid-result-item')
-            self.logger.log(f"    📊 HTML内の商品タグ数: {product_count}")
+            # 商品数の確認（重複考慮）
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(full_html, 'lxml')
+            items = soup.find_all('h-grid-result-item')
+            unique_urls = set()
+            for item in items:
+                link = item.find('a')
+                if link and link.get('href'):
+                    unique_urls.add(link['href'])
+            
+            self.logger.log(f"    📊 HTML内の商品タグ数: {len(items)}（総数）")
+            self.logger.log(f"    📊 ユニーク商品数: {len(unique_urls)}")
             
             return True
             
