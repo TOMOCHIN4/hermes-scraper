@@ -308,44 +308,27 @@ class HermesScraper:
             return None
     
     async def _scroll_page(self, tab):
-        """ページをスクロールして全商品を読み込む（人間化スクロール＋コンソールログ取得の最終版）"""
-        self.logger.log(f"    📜 **最終版**動的スクロール処理開始 (人間化 + 内部情報取得)")
+        """ページをスクロールして全商品を読み込む（最終突破：キーボード操作模倣）"""
+        self.logger.log(f"    📜 **最終突破**動的スクロール処理開始 (キーボード操作模倣)")
 
-        # --- フェーズ1: ボタンクリック（変更なし） ---
+        # --- フェーズ1: ボタンクリック（変更なし・成功実績あり）---
         self.logger.log("\n    --- フェーズ1: 「アイテムをもっと見る」ボタンのクリック試行 ---")
         try:
-            button_selector = 'button[data-testid="Load more items"]'
-            button = await tab.wait_for(button_selector, timeout=7000)
-            
-            # ボタンの可視性を確認
-            is_visible = await tab.evaluate(f'''
-                (function() {{
-                    const button = document.querySelector('{button_selector}');
-                    return button && button.offsetParent !== null;
-                }})()
-            ''')
-            is_visible = normalize_nodriver_result(is_visible)
-            
-            if button and is_visible:
+            button = await tab.find('button[data-testid="Load more items"]', timeout=7)
+            if button and await button.is_displayed():
                 self.logger.log("      [成功] ボタンを発見。クリックを実行します。")
-                await tab.evaluate(f'''
-                    document.querySelector('{button_selector}').scrollIntoView({{behavior: 'smooth', block: 'center'}});
-                ''')
+                await button.scroll_into_view()
                 await asyncio.sleep(1)
                 await button.click()
                 self.logger.log("      [待機] クリック後の商品読み込み待機中（10秒）...")
                 await asyncio.sleep(10)
         except Exception:
-            self.logger.log("      [情報] ボタン処理でタイムアウトまたはエラー。無限スクロールフェーズに進みます。")
+            self.logger.log("      [情報] ボタン処理でタイムアウトまたはエラー。")
 
-        # --- フェーズ2: 人間化無限スクロール ---
-        self.logger.log("\n    --- フェーズ2: 人間化無限スクロールで全件取得 ---")
+        # --- フェーズ2: キーボード「PageDown」による無限スクロール ---
+        self.logger.log("\n    --- フェーズ2: 「PageDown」キープレスによる無限スクロール ---")
         
-        last_count_raw = await tab.evaluate("document.querySelectorAll('h-grid-result-item').length")
-        last_count = normalize_nodriver_result(last_count_raw)
-        if isinstance(last_count, dict):
-            last_count = last_count.get('value', 0)
-        
+        last_count = (await tab.evaluate("document.querySelectorAll('h-grid-result-item').length")).get('value', 0)
         no_new_items_streak = 0
         max_scrolls = 15
 
@@ -353,119 +336,35 @@ class HermesScraper:
             scroll_attempt = i + 1
             self.logger.log(f"\n      --- スクロール試行 {scroll_attempt}/{max_scrolls} ---")
 
-            # [実行] 人間的なスクロールを模倣
-            self.logger.log("        [実行] 人間的なスクロール（マウスホイール模倣）を実行します。")
-            await tab.evaluate('''
-                (async () => {
-                    const distance = window.innerHeight; // 1画面分スクロール
-                    const delay = 100; // 各スクロール間のミリ秒
-                    const steps = 10; // 10回に分けてスクロール
-                    for (let i = 0; i < steps; i++) {
-                        window.scrollBy(0, distance / steps);
-                        await new Promise(resolve => setTimeout(resolve, delay));
-                    }
-                })()
-            ''')
+            # [実行] ユーザーのキーボード操作（PageDown）を完全に模倣
+            self.logger.log("        [実行] キーボードの「PageDown」キーを押下します。")
+            await tab.press('PageDown')
             
             self.logger.log("        [待機] 自動読み込みとレンダリングを待機中 (8秒)...")
             await asyncio.sleep(8)
 
             # [検証] スクロール後の状態を分析
-            current_count_raw = await tab.evaluate("document.querySelectorAll('h-grid-result-item').length")
-            current_count = normalize_nodriver_result(current_count_raw)
-            if isinstance(current_count, dict):
-                current_count = current_count.get('value', 0)
+            current_state_raw = await tab.evaluate('''
+                ({
+                    itemCount: document.querySelectorAll('h-grid-result-item').length,
+                    scrollY: window.scrollY,
+                    scrollHeight: document.body.scrollHeight
+                })
+            ''')
+            current_state = normalize_nodriver_result(current_state_raw)
+            current_count = current_state.get('itemCount', 0)
+            
             self.logger.log(f"        [検証] 現在の商品数: {current_count}個")
+            self.logger.log(f"        [検証] スクロール位置: {current_state.get('scrollY', 'N/A')} / {current_state.get('scrollHeight', 'N/A')}")
 
-            # [内部情報] ブラウザのコンソールログを取得
-            try:
-                # コンソールログの取得（nodriverの方法）
-                console_logs = await tab.evaluate('''
-                    // コンソールログをインターセプト
-                    (function() {
-                        if (window.__console_logs__) {
-                            return window.__console_logs__;
-                        }
-                        return [];
-                    })()
-                ''')
-                
-                console_logs = normalize_nodriver_result(console_logs)
-                if isinstance(console_logs, list) and console_logs:
-                    self.logger.log(f"        [内部情報] ブラウザコンソールで {len(console_logs)} 件のログを検出")
-                    for log in console_logs:
-                        log_message = f"CONSOLE: {log}"
-                        self.logger.log(f"          - {log_message}")
-                        self.console_logs.append(log_message)
-                        
-                # ページ内のエラーも確認
-                js_errors = await tab.evaluate('''
-                    (function() {
-                        const errors = [];
-                        // 既存のエラーハンドラーをオーバーライド
-                        const originalError = window.onerror;
-                        window.onerror = function(msg, url, line, col, error) {
-                            errors.push({
-                                message: msg,
-                                source: url,
-                                line: line,
-                                column: col,
-                                error: error ? error.toString() : 'N/A'
-                            });
-                            if (originalError) originalError.apply(window, arguments);
-                        };
-                        return errors;
-                    })()
-                ''')
-                
-                js_errors = normalize_nodriver_result(js_errors)
-                if isinstance(js_errors, list) and js_errors:
-                    self.logger.log(f"        [内部情報] JavaScriptエラーを検出")
-                    for error in js_errors:
-                        error_msg = f"JS ERROR: {error.get('message', 'Unknown error')}"
-                        self.logger.log(f"          - {error_msg}")
-                        self.console_logs.append(error_msg)
-                        
-            except Exception as e:
-                self.logger.log(f"        [内部情報] ⚠️ コンソールログの取得に失敗: {e}")
 
             # [判断] と [終了条件]
             if current_count > last_count:
-                self.logger.log(f"        [判断] ✅ 新規商品 {current_count - last_count}個を検出しました。")
+                self.logger.log(f"        [判断] ✅ 新規商品 {current_count - last_count}個を検出しました！")
                 no_new_items_streak = 0
-                
-                # 特定のタイミングでスナップショットを保存
-                if scroll_attempt in [1, 5, 10]:
-                    await self._save_html_snapshot(tab, f'snapshot_scroll_{scroll_attempt}.html', f'[デバッグ] スクロール{scroll_attempt}回目')
             else:
                 no_new_items_streak += 1
                 self.logger.log(f"        [判断] ⏸️ 新規商品はありませんでした。(連続 {no_new_items_streak}回)")
-                
-                # 96商品以降で新商品が読み込まれない場合、詳細な調査
-                if current_count >= 96:
-                    self.logger.log("        [調査] 96商品以降で停滞。ページ状態を確認...")
-                    
-                    # ネットワーク状態の確認
-                    network_state = await tab.evaluate('''
-                        (function() {
-                            // XHRやfetchリクエストが進行中か確認
-                            const activeRequests = performance.getEntriesByType('resource')
-                                .filter(entry => entry.duration === 0).length;
-                            
-                            return {
-                                activeRequests: activeRequests,
-                                readyState: document.readyState,
-                                scrollY: window.scrollY,
-                                scrollHeight: document.body.scrollHeight,
-                                clientHeight: document.documentElement.clientHeight
-                            };
-                        })()
-                    ''')
-                    
-                    network_state = normalize_nodriver_result(network_state)
-                    self.logger.log(f"          - アクティブリクエスト: {network_state.get('activeRequests', 0)}")
-                    self.logger.log(f"          - ページ状態: {network_state.get('readyState', 'unknown')}")
-                    self.logger.log(f"          - スクロール位置: {network_state.get('scrollY', 0)}/{network_state.get('scrollHeight', 0)}")
             
             if no_new_items_streak >= 3:
                 self.logger.log("\n      [終了] 3回連続で新規商品がなかったため、全件取得完了と判断します。")
@@ -479,65 +378,9 @@ class HermesScraper:
             if scroll_attempt == max_scrolls:
                 self.logger.log(f"\n      [警告] 最大スクロール回数 ({max_scrolls}回) に到達しました。")
         
-        # 最終結果サマリー
-        final_count_raw = await tab.evaluate("document.querySelectorAll('h-grid-result-item').length")
-        final_count = normalize_nodriver_result(final_count_raw)
-        if isinstance(final_count, dict):
-            final_count = final_count.get('value', 0)
-            
-        self.logger.log(f"\n    [最終結果] スクロール処理完了。")
-        self.logger.log(f"    [最終結果] 最終的な取得見込み商品数: {final_count}個")
-        
-        if self.total_items > 0:
-            coverage = (final_count / self.total_items) * 100 if self.total_items > 0 else 0
-            self.logger.log(f"    [最終結果] 宣言に対する取得率: {coverage:.1f}% ({final_count}/{self.total_items})")
-            if coverage < 95:
-                self.logger.log(f"    [要確認] ⚠️ 取得率が95%未満です。サイトの挙動が変更された可能性があります。")
-        
-        await self._save_html_snapshot(tab, 'snapshot_final_page.html', '[デバッグ] 最終状態')
-        selector = 'button[data-testid="Load more items"]'
-        
-        try:
-            # ボタンの存在確認
-            button_info = await tab.evaluate(f'''
-                (function() {{
-                    const button = document.querySelector('{selector}');
-                    if (button) {{
-                        return {{
-                            exists: true,
-                            visible: button.offsetParent !== null,
-                            disabled: button.disabled || button.getAttribute('aria-disabled') === 'true',
-                            text: button.textContent.trim()
-                        }};
-                    }}
-                    return {{ exists: false }};
-                }})()
-            ''')
-            
-            button_data = normalize_nodriver_result(button_info)
-            
-            if safe_get(button_data, 'exists'):
-                is_visible = safe_get(button_data, 'visible', False)
-                is_disabled = safe_get(button_data, 'disabled', False)
-                
-                self.logger.log(f"        ⭐ Load Moreボタン発見")
-                self.logger.log(f"           - 表示状態: {is_visible}")
-                self.logger.log(f"           - 無効状態: {is_disabled}")
-                
-                if is_visible and not is_disabled:
-                    # シンプルなクリック処理
-                    success = await self._click_hermes_button(tab, selector)
-                    return success
-                else:
-                    self.logger.log(f"           - ⚠️ ボタンはクリック不可状態")
-                    return False
-            else:
-                self.logger.log(f"        ℹ️ Load Moreボタンが見つかりませんでした")
-                return False
-                
-        except Exception as e:
-            self.logger.log(f"        ❌ エラー: {str(e)}")
-            return False
+        # 最終結果サマリー（変更なし）
+        final_count = (await tab.evaluate("document.querySelectorAll('h-grid-result-item').length")).get('value', 0)
+        self.logger.log(f"\n    [最終結果] スクロール処理完了。最終的な取得見込み商品数: {final_count}個")
     
     async def _click_hermes_button(self, tab, selector):
         """エルメスボタンの確実クリック"""
