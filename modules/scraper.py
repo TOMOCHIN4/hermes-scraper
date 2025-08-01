@@ -430,14 +430,22 @@ class HermesScraper:
                 
                 # 新しい商品が読み込まれたかチェック
                 if current_count > last_count:
-                    self.logger.log(f"        ✅ 新規商品検出: +{current_count - last_count}")
+                    self.logger.log(f"        ✅ 新規商品検出: +{current_count - last_count} (合計: {current_count}個)")
                     no_new_items_count = 0
+                    
+                    # フェーズ移行の検出
+                    if last_count < 96 and current_count >= 96:
+                        self.logger.log(f"        🎉 フェーズ2突入！無限スクロールモード開始")
                     
                     # 新商品検出時のHTMLスナップショット保存
                     await self._save_html_snapshot(tab, f'scroll_{scroll_attempt + 1}_newitem_{current_count}.html', f'スクロール{scroll_attempt + 1}回目_新商品検出_{current_count}個')
                 else:
                     no_new_items_count += 1
                     self.logger.log(f"        ⏸️ 新規商品なし (連続{no_new_items_count}回)")
+                    
+                    # デバッグ情報：なぜ新商品が読み込まれないか
+                    if current_count >= 96 and at_bottom:
+                        self.logger.log(f"        🔍 デバッグ: 最下部到達済みだが新商品なし - 無限スクロールが機能していない可能性")
                 
                 # 定期的なHTMLスナップショット保存（デバッグ用）
                 if (scroll_attempt + 1) in html_snapshot_intervals:
@@ -457,8 +465,15 @@ class HermesScraper:
                 scroll_info = normalize_nodriver_result(scroll_info_raw)
                 
                 at_bottom = safe_get(scroll_info, 'atBottom', False)
+                scroll_y = safe_get(scroll_info, 'scrollY', 0)
+                scroll_height = safe_get(scroll_info, 'scrollHeight', 0)
+                client_height = safe_get(scroll_info, 'clientHeight', 0)
+                
+                # スクロール位置の詳細ログ
+                self.logger.log(f"        📏 スクロール位置: {scroll_y:.0f}/{scroll_height:.0f} (画面高さ: {client_height:.0f})")
+                
                 if at_bottom:
-                    self.logger.log(f"        📍 ページ最下部到達")
+                    self.logger.log(f"        📍 ページ最下部到達 (残り: {scroll_height - scroll_y - client_height:.0f}px)")
                     # ページ最下部到達時のHTMLスナップショット
                     if not hasattr(self, '_saved_bottom_reached'):
                         await self._save_html_snapshot(tab, f'scroll_bottom_reached_{current_count}.html', f'ページ最下部到達_{current_count}個')
@@ -474,6 +489,22 @@ class HermesScraper:
                         self.logger.log(f"        ⏳ ローディングアニメーション検出！新商品読み込み中...")
                         await asyncio.sleep(5)  # 読み込み完了を待つ
                         continue
+                    else:
+                        self.logger.log(f"        ❓ ローディングアニメーションは検出されず")
+                        
+                    # 最下部到達しているかの詳細確認
+                    if at_bottom:
+                        self.logger.log(f"        🔍 最下部到達済み - 自動ローディングを期待")
+                        
+                        # DOM変更を監視（新商品の読み込みを検出）
+                        self.logger.log(f"        🔄 DOM変更を監視中...")
+                        dom_changed = await self._detect_dom_changes(tab, wait_time=5)
+                        
+                        if dom_changed:
+                            self.logger.log(f"        ✨ DOM変更検出！新商品が読み込まれた可能性")
+                            continue  # 次のループで商品数を確認
+                        else:
+                            self.logger.log(f"        ⚠️ DOM変更なし - 無限スクロールが作動していない")
                 
                 # 終了条件（無限スクロールモードでは緩和）
                 if current_count < 96 and no_new_items_count >= 2:  # フェーズ1では2回
@@ -745,6 +776,7 @@ class HermesScraper:
     
     async def _check_loading_animation(self, tab):
         """ローディングアニメーション（3つのドット）を検出"""
+        self.logger.log(f"        🔎 ローディングアニメーション検出開始...")
         try:
             # ローディングインジケーターの一般的なセレクター
             loading_selectors = [
@@ -756,7 +788,11 @@ class HermesScraper:
                 '.spinner',
                 '[aria-label*="loading"]',
                 '[aria-label*="Loading"]',
-                'div[class*="dot"]'
+                'div[class*="dot"]',
+                # エルメス固有の可能性
+                'h-loading',
+                '[class*="load-more"]',
+                '.progress'
             ]
             
             for selector in loading_selectors:
@@ -798,10 +834,60 @@ class HermesScraper:
                 })()
             ''')
             
-            return normalize_nodriver_result(animating_elements)
+            result = normalize_nodriver_result(animating_elements)
+            if not result:
+                self.logger.log(f"        ❌ ローディングアニメーション検出なし")
+            return result
             
         except Exception as e:
             self.logger.log(f"        ⚠️ ローディング検出エラー: {e}")
+            return False
+    
+    async def _detect_dom_changes(self, tab, wait_time=2):
+        """DOM変更を検出（新商品読み込みの間接的な検出）"""
+        try:
+            # 現在のDOM状態を記録
+            initial_state = await tab.evaluate('''
+                (function() {
+                    const items = document.querySelectorAll('h-grid-result-item');
+                    return {
+                        itemCount: items.length,
+                        lastItemId: items.length > 0 ? items[items.length - 1].getAttribute('id') || 'no-id' : null,
+                        bodyHeight: document.body.scrollHeight
+                    };
+                })()
+            ''')
+            
+            await asyncio.sleep(wait_time)
+            
+            # 変更後の状態を確認
+            final_state = await tab.evaluate('''
+                (function() {
+                    const items = document.querySelectorAll('h-grid-result-item');
+                    return {
+                        itemCount: items.length,
+                        lastItemId: items.length > 0 ? items[items.length - 1].getAttribute('id') || 'no-id' : null,
+                        bodyHeight: document.body.scrollHeight
+                    };
+                })()
+            ''')
+            
+            initial = normalize_nodriver_result(initial_state)
+            final = normalize_nodriver_result(final_state)
+            
+            changes_detected = (
+                safe_get(initial, 'itemCount') != safe_get(final, 'itemCount') or
+                safe_get(initial, 'lastItemId') != safe_get(final, 'lastItemId') or
+                safe_get(initial, 'bodyHeight') != safe_get(final, 'bodyHeight')
+            )
+            
+            if changes_detected:
+                self.logger.log(f"        📊 DOM変更検出: アイテム数 {safe_get(initial, 'itemCount')} → {safe_get(final, 'itemCount')}")
+            
+            return changes_detected
+            
+        except Exception as e:
+            self.logger.log(f"        ⚠️ DOM変更検出エラー: {e}")
             return False
     
     async def _save_html_snapshot(self, tab, filename, label):
