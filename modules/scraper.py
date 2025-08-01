@@ -386,11 +386,39 @@ class HermesScraper:
 
             # [実行] ページ最下部へスクロール
             self.logger.log("        [実行] ページ最下部へスクロールを実行します。")
-            await tab.evaluate("window.scrollTo(0, document.body.scrollHeight);")
+            
+            # 96商品以降は無限スクロールのトリガーを確実にする
+            if last_count >= 96:
+                # より確実に最下部に到達するため、複数回スクロール
+                await tab.evaluate("""
+                    // 最下部へスクロール
+                    window.scrollTo(0, document.body.scrollHeight);
+                """)
+                await asyncio.sleep(1)
+                
+                # フッター要素が見えるまでスクロール（無限スクロールのトリガー）
+                await tab.evaluate("""
+                    // フッターまたは最下部要素を確実に表示
+                    const footer = document.querySelector('footer') || document.querySelector('[class*="footer"]');
+                    if (footer) {
+                        footer.scrollIntoView({behavior: 'smooth', block: 'end'});
+                    } else {
+                        // フッターがない場合は最下部へ
+                        window.scrollTo(0, document.body.scrollHeight + 100);
+                    }
+                """)
+                self.logger.log("        [実行] フッター要素まで確実にスクロール（無限スクロールトリガー）")
+            else:
+                await tab.evaluate("window.scrollTo(0, document.body.scrollHeight);")
             
             # [待機] ネットワークとレンダリングのための待機
-            self.logger.log("        [待機] 自動読み込みとレンダリングを待機中 (5秒)...")
-            await asyncio.sleep(5)
+            # 96商品以降は無限スクロールモードなので、より長い待機が必要
+            if last_count >= 96:
+                self.logger.log("        [待機] 無限スクロールモード: 自動読み込みを待機中 (10秒)...")
+                await asyncio.sleep(10)
+            else:
+                self.logger.log("        [待機] 自動読み込みとレンダリングを待機中 (5秒)...")
+                await asyncio.sleep(5)
 
             # [検証] スクロール後の状態を多角的に分析
             current_state_raw = await tab.evaluate('''
@@ -770,20 +798,26 @@ class HermesScraper:
     
     def get_results(self):
         """実行結果を取得"""
-        results = self.logger.get_results()
+        # ログメッセージのリストを取得
+        log_messages = self.logger.get_results()
         
-        # 生成されたファイルのリストを追加
+        # 生成されたファイルのリストを取得
         import os
+        import glob
         generated_files = []
         
         # スナップショットファイルを検索
         snapshot_patterns = ['snapshot_*.html', 'before_click.html', 'after_click.html', 'hermes_page.html']
         for pattern in snapshot_patterns:
-            import glob
             files = glob.glob(pattern)
             generated_files.extend(files)
         
-        # ユニークなファイルリストにして、結果に追加
-        results['generated_files'] = list(set(generated_files))
+        # 生成されたファイル情報をログメッセージに追加
+        if generated_files:
+            log_messages.append("\n📸 生成されたスナップショットファイル:")
+            for file in sorted(set(generated_files)):
+                if os.path.exists(file):
+                    size = os.path.getsize(file) / 1024
+                    log_messages.append(f"  - {file} ({size:.1f} KB)")
         
-        return results
+        return log_messages
