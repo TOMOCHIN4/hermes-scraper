@@ -1,4 +1,7 @@
-gradio>=5.0.0
+gradio==5.0.0
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.0,<3.0
 nodriver>=0.34
 asyncio-throttle
 aiohttp
