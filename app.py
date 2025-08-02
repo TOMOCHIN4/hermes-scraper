@@ -384,32 +384,40 @@ with gr.Blocks(title="Hermes商品情報抽出システム") as demo:
     )
 
 
-# StaticFiles → gr.mount_gradio_app の順でマウント（StaticFilesを先に）
-# 注: 現在は静的ファイルなしだが、必要に応じて追加可能
-# app.mount("/static", StaticFiles(directory="static"), name="static")
+# 環境判定：HuggingFace Spaces vs ローカル環境
+is_hf_spaces = os.environ.get("SPACE_ID") is not None
 
-# FastAPIにGradioをマウント（HuggingFace Spaces対応）
-app = gr.mount_gradio_app(app, demo, path="/", root_path="/")
-
-# HuggingFace Spaces用の起動設定
-if __name__ == "__main__":
-    import uvicorn
+if is_hf_spaces:
+    # HuggingFace Spaces: 単純なGradio起動（307リダイレクト回避）
+    print("HuggingFace Spaces環境を検出：Gradio単体で起動します")
+    if __name__ == "__main__":
+        demo.launch(
+            server_name="0.0.0.0",
+            server_port=7860,
+            share=False
+        )
+else:
+    # ローカル環境: FastAPI + Gradio統合
+    print("ローカル環境：FastAPI + Gradio統合版で起動します")
     
-    # 環境変数の設定（HuggingFace Spaces対応）
-    os.environ["GRADIO_SERVER_NAME"] = "0.0.0.0"
-    os.environ["GRADIO_ROOT_PATH"] = "/"
+    # StaticFiles → gr.mount_gradio_app の順でマウント（StaticFilesを先に）
+    # app.mount("/static", StaticFiles(directory="static"), name="static")
     
-    print("Hermes商品情報抽出システム（FastAPI + Gradio統合版）を起動しています...")
-    print(f"Python version: {sys.version}")
-    print(f"Gradio version: {gr.__version__}")
-    print("")
+    # FastAPIにGradioをマウント
+    app = gr.mount_gradio_app(app, demo, path="/app")
     
-    # HuggingFace Spacesではポート7860を使用、プロキシヘッダー有効
-    logger.info("Starting server on http://0.0.0.0:7860")
-    uvicorn.run(
-        app, 
-        host="0.0.0.0", 
-        port=7860, 
-        log_level="info",
-        proxy_headers=True  # HuggingFace Spacesのリバースプロキシ対応
-    )
+    if __name__ == "__main__":
+        import uvicorn
+        
+        print("Hermes商品情報抽出システム（FastAPI + Gradio統合版）を起動しています...")
+        print(f"Python version: {sys.version}")
+        print(f"Gradio version: {gr.__version__}")
+        print("")
+        
+        logger.info("Starting server on http://0.0.0.0:7860")
+        uvicorn.run(
+            app, 
+            host="0.0.0.0", 
+            port=7860, 
+            log_level="info"
+        )
