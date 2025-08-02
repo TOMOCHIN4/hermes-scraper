@@ -1,25 +1,74 @@
 """
 Hermes商品情報抽出アプリケーション
-FastAPIとGradioを統合したバージョン（HuggingFace Spaces対応）
+HuggingFace Spaces: Gradio単体 / ローカル: FastAPI統合
 """
 import sys
 import os
 import asyncio
 import gradio as gr
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
-from typing import Optional, Dict, List, Any
 from datetime import datetime
 import traceback
 import time
 import urllib.parse
-import logging
 
-# ロギング設定
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# HuggingFace Spaces環境判定（最優先）
+is_hf_spaces = os.environ.get("SPACE_ID") is not None
+
+print(f"環境判定: HuggingFace Spaces = {is_hf_spaces}")
+
+# FastAPI関連はローカル環境のみで初期化
+if not is_hf_spaces:
+    print("ローカル環境：FastAPI関連をインポート")
+    from fastapi import FastAPI, HTTPException
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.staticfiles import StaticFiles
+    from pydantic import BaseModel
+    from typing import Optional, Dict, List, Any
+    import logging
+    
+    # ロギング設定
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+    
+    # FastAPIアプリケーションの初期化
+    app = FastAPI(
+        title="Hermes Scraper API",
+        description="エルメス商品情報抽出システムのAPIサーバー",
+        version="1.0.0"
+    )
+    
+    # CORS設定
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    
+    # リクエスト/レスポンスモデル
+    class ScrapeRequest(BaseModel):
+        keyword: str = "バッグ"
+        worker_id: Optional[str] = None
+
+    class ScrapeResponse(BaseModel):
+        status: str
+        timestamp: str
+        worker_id: Optional[str]
+        keyword: str
+        total_products: int
+        unique_products: int
+        files: Dict[str, str]
+        products: Optional[List[Dict[str, Any]]] = None
+        error: Optional[str] = None
+        execution_time: float
+
+    class HealthResponse(BaseModel):
+        status: str
+        version: str
+        timestamp: str
+else:
+    print("HuggingFace Spaces環境：FastAPI無効、Gradio単体で動作")
 
 # モジュールのインポート
 from modules import (
@@ -28,45 +77,6 @@ from modules import (
     HermesParser,
     FileHandler
 )
-
-# FastAPIアプリケーションの初期化（root_path設定）
-app = FastAPI(
-    title="Hermes Scraper API",
-    description="エルメス商品情報抽出システムのAPIサーバー",
-    version="1.0.0",
-    root_path="/"  # HuggingFace Spaces対応
-)
-
-# CORS設定
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# リクエスト/レスポンスモデル
-class ScrapeRequest(BaseModel):
-    keyword: str = "バッグ"
-    worker_id: Optional[str] = None
-
-class ScrapeResponse(BaseModel):
-    status: str
-    timestamp: str
-    worker_id: Optional[str]
-    keyword: str
-    total_products: int
-    unique_products: int
-    files: Dict[str, str]
-    products: Optional[List[Dict[str, Any]]] = None
-    error: Optional[str] = None
-    execution_time: float
-
-class HealthResponse(BaseModel):
-    status: str
-    version: str
-    timestamp: str
 
 # Gradio UI用のメイン処理関数
 def main_process(search_keyword="バッグ"):
@@ -183,136 +193,159 @@ def get_downloadable_files():
     return file_list
 
 
-# FastAPIエンドポイント
-@app.get("/api/info")
-async def api_info():
-    """API情報エンドポイント"""
-    return {
-        "message": "Hermes Scraper API",
-        "version": "1.0.0",
-        "endpoints": {
-            "health": "/api/v1/health",
-            "scrape": "/api/v1/scrape"
+# FastAPIエンドポイント（ローカル環境のみ）
+if not is_hf_spaces:
+    @app.get("/api/info")
+    async def api_info():
+        """API情報エンドポイント"""
+        return {
+            "message": "Hermes Scraper API",
+            "version": "1.0.0",
+            "endpoints": {
+                "health": "/api/v1/health",
+                "scrape": "/api/v1/scrape"
+            }
         }
-    }
 
-@app.get("/api/v1/health", response_model=HealthResponse)
-async def health_check():
-    """ヘルスチェックエンドポイント"""
-    return HealthResponse(
-        status="healthy",
-        version="1.0.0",
-        timestamp=datetime.now().isoformat()
-    )
+    @app.get("/api/v1/health", response_model=HealthResponse)
+    async def health_check():
+        """ヘルスチェックエンドポイント"""
+        return HealthResponse(
+            status="healthy",
+            version="1.0.0",
+            timestamp=datetime.now().isoformat()
+        )
 
-@app.post("/api/v1/scrape", response_model=ScrapeResponse)
-async def scrape_hermes(request: ScrapeRequest):
-    """エルメスサイトをスクレイピングして商品情報を抽出"""
-    start_time = time.time()
-    
-    try:
-        # 環境チェック
-        env_ok, env_results = check_environment()
-        if not env_ok:
-            raise HTTPException(
-                status_code=500,
-                detail="環境チェックに失敗しました"
+    @app.post("/api/v1/scrape", response_model=ScrapeResponse)
+    async def scrape_hermes(request: ScrapeRequest):
+        """エルメスサイトをスクレイピングして商品情報を抽出"""
+        start_time = time.time()
+        
+        try:
+            # 環境チェック
+            env_ok, env_results = check_environment()
+            if not env_ok:
+                raise HTTPException(
+                    status_code=500,
+                    detail="環境チェックに失敗しました"
+                )
+            
+            # スクレイピング実行
+            scraper = HermesScraper()
+            success = await scraper.scrape_hermes_site(search_keyword=request.keyword)
+            
+            if not success:
+                raise HTTPException(
+                    status_code=500,
+                    detail="スクレイピングに失敗しました"
+                )
+            
+            # HTML解析
+            parser = HermesParser()
+            parse_success = parser.parse_html_file()
+            
+            if not parse_success:
+                raise HTTPException(
+                    status_code=500,
+                    detail="HTML解析に失敗しました"
+                )
+            
+            products = parser.get_products()
+            
+            # ファイル名にタイムスタンプとワーカーIDを追加
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            worker_suffix = f"_{request.worker_id}" if request.worker_id else ""
+            
+            # ファイル名を変更
+            html_file = f"hermes_page_{timestamp}{worker_suffix}.html"
+            json_file = f"hermes_products_{timestamp}{worker_suffix}.json"
+            
+            # 既存のファイルをリネーム
+            if os.path.exists("hermes_page.html"):
+                os.rename("hermes_page.html", html_file)
+            if os.path.exists("hermes_products.json"):
+                os.rename("hermes_products.json", json_file)
+            
+            # 実行時間を計算
+            execution_time = time.time() - start_time
+            
+            # レスポンスを作成
+            return ScrapeResponse(
+                status="success",
+                timestamp=datetime.now().isoformat(),
+                worker_id=request.worker_id,
+                keyword=request.keyword,
+                total_products=len(products),
+                unique_products=len(products),
+                files={
+                    "html": html_file,
+                    "json": json_file
+                },
+                products=products if len(products) <= 10 else None,
+                execution_time=execution_time
             )
-        
-        # スクレイピング実行
-        scraper = HermesScraper()
-        success = await scraper.scrape_hermes_site(search_keyword=request.keyword)
-        
-        if not success:
-            raise HTTPException(
-                status_code=500,
-                detail="スクレイピングに失敗しました"
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            execution_time = time.time() - start_time
+            return ScrapeResponse(
+                status="error",
+                timestamp=datetime.now().isoformat(),
+                worker_id=request.worker_id,
+                keyword=request.keyword,
+                total_products=0,
+                unique_products=0,
+                files={},
+                error=str(e),
+                execution_time=execution_time
             )
-        
-        # HTML解析
-        parser = HermesParser()
-        parse_success = parser.parse_html_file()
-        
-        if not parse_success:
-            raise HTTPException(
-                status_code=500,
-                detail="HTML解析に失敗しました"
-            )
-        
-        products = parser.get_products()
-        
-        # ファイル名にタイムスタンプとワーカーIDを追加
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        worker_suffix = f"_{request.worker_id}" if request.worker_id else ""
-        
-        # ファイル名を変更
-        html_file = f"hermes_page_{timestamp}{worker_suffix}.html"
-        json_file = f"hermes_products_{timestamp}{worker_suffix}.json"
-        
-        # 既存のファイルをリネーム
-        if os.path.exists("hermes_page.html"):
-            os.rename("hermes_page.html", html_file)
-        if os.path.exists("hermes_products.json"):
-            os.rename("hermes_products.json", json_file)
-        
-        # 実行時間を計算
-        execution_time = time.time() - start_time
-        
-        # レスポンスを作成
-        return ScrapeResponse(
-            status="success",
-            timestamp=datetime.now().isoformat(),
-            worker_id=request.worker_id,
-            keyword=request.keyword,
-            total_products=len(products),
-            unique_products=len(products),
-            files={
-                "html": html_file,
-                "json": json_file
-            },
-            products=products if len(products) <= 10 else None,
-            execution_time=execution_time
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        execution_time = time.time() - start_time
-        return ScrapeResponse(
-            status="error",
-            timestamp=datetime.now().isoformat(),
-            worker_id=request.worker_id,
-            keyword=request.keyword,
-            total_products=0,
-            unique_products=0,
-            files={},
-            error=str(e),
-            execution_time=execution_time
-        )
 
 
 # Gradioインターフェース
 with gr.Blocks(title="Hermes商品情報抽出システム") as demo:
-    gr.Markdown("""
-    # 🛍️ Hermes商品情報抽出システム
+    # 環境別UI説明文
+    if is_hf_spaces:
+        ui_description = """
+        # 🛍️ Hermes商品情報抽出システム
+        
+        エルメス公式サイトから商品情報を自動抽出します。
+        
+        ## 実行フロー
+        1. **Phase 1-5**: 環境チェック（Python、依存関係、Chromium、ネットワーク）
+        2. **Phase 6.0**: Hermesサイトスクレイピング（HTMLダウンロード）
+        3. **Phase 6.5**: HTML解析（商品情報抽出）
+        
+        ## 使い方
+        1. 検索キーワードを入力（デフォルト: バッグ）
+        2. 「実行」ボタンをクリック
+        3. 処理完了を待つ（約1-2分）
+        4. 生成されたファイルをダウンロード
+        """
+    else:
+        ui_description = """
+        # 🛍️ Hermes商品情報抽出システム
+        
+        エルメス公式サイトから商品情報を自動抽出します。
+        
+        ## 実行フロー
+        1. **Phase 1-5**: 環境チェック（Python、依存関係、Chromium、ネットワーク）
+        2. **Phase 6.0**: Hermesサイトスクレイピング（HTMLダウンロード）
+        3. **Phase 6.5**: HTML解析（商品情報抽出）
+        
+        ## 使い方
+        1. 検索キーワードを入力（デフォルト: バッグ）
+        2. 「実行」ボタンをクリック
+        3. 処理完了を待つ（約1-2分）
+        4. 生成されたファイルをダウンロード
+        
+        ## API利用
+        - **Health Check**: `GET /api/v1/health`
+        - **Scrape**: `POST /api/v1/scrape`
+        - **Gradio UI**: `http://localhost:7860/app`
+        """
     
-    エルメス公式サイトから商品情報を自動抽出します。
-    
-    ## 実行フロー
-    1. **Phase 1-5**: 環境チェック（Python、依存関係、Chromium、ネットワーク）
-    2. **Phase 6.0**: Hermesサイトスクレイピング（HTMLダウンロード）
-    3. **Phase 6.5**: HTML解析（商品情報抽出）
-    
-    ## 使い方
-    1. 検索キーワードを入力（デフォルト: バッグ）
-    2. 「実行」ボタンをクリック
-    3. 処理完了を待つ（約1-2分）
-    4. 生成されたファイルをダウンロード
-    
-    ## API利用
-    - **Health Check**: `GET /api/v1/health`
-    - **Scrape**: `POST /api/v1/scrape`
-    """)
+    gr.Markdown(ui_description)
     
     with gr.Row():
         with gr.Column(scale=1):
