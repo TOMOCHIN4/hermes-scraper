@@ -65,14 +65,21 @@ class HermesScraper:
                 self.logger.log(f"⚠️ ブラウザ終了時の警告: {e}")
                 # エラーが発生してもプロセスは継続
     
-    async def scrape_hermes_site(self, url="https://www.hermes.com/jp/ja/search/?s=%E3%83%90%E3%83%83%E3%82%B0#"):
+    async def scrape_hermes_site(self, url=None, search_keyword="バッグ"):
         """エルメスサイトをスクレイピング"""
         success = False
         
         try:
+            # URLが指定されていない場合は、検索キーワードから生成
+            if url is None:
+                import urllib.parse
+                encoded_keyword = urllib.parse.quote(search_keyword)
+                url = f"https://www.hermes.com/jp/ja/search/?s={encoded_keyword}#"
+            
             await self.start_browser()
             
             self.logger.log("  Step 2: エルメス公式サイト接続テスト")
+            self.logger.log(f"    🔍 検索キーワード: {search_keyword}")
             self.logger.log(f"    URL: {url}")
             self.logger.log(f"    ⏳ 接続中 (タイムアウト: 45秒)...")
             

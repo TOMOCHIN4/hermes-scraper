@@ -19,7 +19,7 @@ from modules import (
 )
 
 
-def main_process():
+def main_process(search_keyword="バッグ"):
     """メイン処理を実行"""
     results = []
     
@@ -47,10 +47,11 @@ def main_process():
         
         # Phase 6.0: スクレイピング実行
         log_and_append("🌐 Phase 6.0: Hermesサイトスクレイピング開始...")
+        log_and_append(f"🔍 検索キーワード: {search_keyword}")
         
         async def run_scraping():
             scraper = HermesScraper()
-            success = await scraper.scrape_hermes_site()
+            success = await scraper.scrape_hermes_site(search_keyword=search_keyword)
             return success, scraper.get_results()
         
         # 非同期処理を実行
@@ -152,6 +153,12 @@ with gr.Blocks(title="Hermes商品情報抽出システム") as demo:
     
     with gr.Row():
         with gr.Column(scale=1):
+            search_input = gr.Textbox(
+                label="🔍 検索キーワード",
+                placeholder="例: バッグ、財布、時計など",
+                value="バッグ",
+                info="エルメス公式サイトで検索したい商品カテゴリを入力"
+            )
             run_button = gr.Button("🚀 実行", variant="primary", size="lg")
             
             gr.Markdown("""
@@ -194,6 +201,7 @@ with gr.Blocks(title="Hermes商品情報抽出システム") as demo:
     # イベントハンドラー
     run_button.click(
         fn=main_process,
+        inputs=search_input,
         outputs=output_text
     ).then(
         fn=update_file_list,
