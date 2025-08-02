@@ -421,13 +421,16 @@ with gr.Blocks(title="Hermes商品情報抽出システム") as demo:
 is_hf_spaces = os.environ.get("SPACE_ID") is not None
 
 if is_hf_spaces:
-    # HuggingFace Spaces: 単純なGradio起動（307リダイレクト回避）
+    # HuggingFace Spaces: 単純なGradio起動（APIスキーマエラー回避）
     print("HuggingFace Spaces環境を検出：Gradio単体で起動します")
     if __name__ == "__main__":
         demo.launch(
             server_name="0.0.0.0",
             server_port=7860,
-            share=False
+            share=False,
+            enable_queue=False,  # キュー無効化でエラー回避
+            show_api=False,      # API表示無効化でスキーマエラー回避
+            debug=False          # デバッグモード無効
         )
 else:
     # ローカル環境: FastAPI + Gradio統合
